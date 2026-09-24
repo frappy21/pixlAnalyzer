@@ -103,7 +103,11 @@ Works without opening anything:
 3. Or the bootloader's own gesture: hold the joystick **right** while power is
    applied, for more than 3 seconds (`NRF_BL_DFU_ENTER_METHOD_BUTTON_PIN = 7`).
 
-Then flash `firmware/build/PixlAnalyzer{OLED,LCD}.zip` with nRF Connect.
+Then flash `prebuilt/PixlAnalyzer{OLED,LCD}.zip` with nRF Connect.
+
+(The two `.zip` files sitting in `firmware/` are the *original upstream* images
+from atc1441, kept for reference. The ones to flash are in `prebuilt/`, or built
+by `make packages` into `firmware/build/`.)
 
 ## State of things
 
