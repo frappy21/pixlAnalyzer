@@ -35,6 +35,17 @@ static void draw_strip(const radar_view_t *view)
         if (h)
             gfx_vline(STRIP_X + i, STRIP_Y + STRIP_H - h, STRIP_Y + STRIP_H - 2);
     }
+
+    // In follow mode: invert the tracked channel range on the strip
+    if (view->follow && view->follow_end >= view->follow_start)
+    {
+        int s = (int)(view->follow_start - RADAR_START_MHZ);
+        int e = (int)(view->follow_end - RADAR_START_MHZ);
+        if (s < 0) s = 0;
+        if (e >= (int)view->strip_len) e = (int)view->strip_len - 1;
+        if (s <= e)
+            gfx_invert(STRIP_X + s, STRIP_Y - 1, e - s + 1, STRIP_H + 2);
+    }
 }
 
 static void draw_signals(const radar_view_t *view)
@@ -131,9 +142,22 @@ void ui_radar(const radar_view_t *view)
     ui_title("RADAR");
     ui_battery();
 
-    // Mode in the title row
-    const char *mode = radar_mode_name(view->mode);
-    gfx_text_micro(50, 2, mode);
+    // Mode in the title row; in follow mode show channel count instead
+    if (view->follow)
+    {
+        gfx_text_micro(50, 2, "FOLLOW");
+        uint16_t n = view->follow_end >= view->follow_start
+                         ? (uint16_t)(view->follow_end - view->follow_start + 1)
+                         : 0;
+        gfx_fmt_int(buf, (int)n);
+        int fx = 90;
+        gfx_text_micro(fx, 2, buf);
+        gfx_text_micro(fx + gfx_text_micro_width(buf) + 1, 2, "CH");
+    }
+    else
+    {
+        gfx_text_micro(50, 2, radar_mode_name(view->mode));
+    }
 
     if (view->mode == 2)
     {

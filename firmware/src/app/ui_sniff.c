@@ -25,13 +25,24 @@ static void addr_str(char *out, const uint8_t *addr, uint8_t addr_len)
     out[n] = '\0';
 }
 
-void ui_sniff_list(uint16_t lock_mhz, uint16_t hop_mhz, uint32_t locks, uint32_t decoded)
+void ui_sniff_list(uint16_t lock_mhz, uint16_t hop_mhz, uint32_t locks, uint32_t decoded,
+                   uint8_t a0_filter)
 {
     char buf[16];
 
     display_clear();
     gfx_text(2, 1, "SNIFF");
-    if (lock_mhz)
+
+    // Channel or A0 filter in the header
+    if (a0_filter)
+    {
+        buf[0] = 'A'; buf[1] = '0'; buf[2] = ':';
+        buf[3] = hex_digits[a0_filter >> 4];
+        buf[4] = hex_digits[a0_filter & 0xF];
+        buf[5] = '\0';
+        gfx_text_micro(34, 2, buf);
+    }
+    else if (lock_mhz)
     {
         gfx_fmt_int(buf, lock_mhz);
         gfx_text_micro(34, 2, buf);
@@ -88,7 +99,29 @@ void ui_sniff_list(uint16_t lock_mhz, uint16_t hop_mhz, uint32_t locks, uint32_t
     }
 
     gfx_hline(0, DISP_W - 1, 55);
-    gfx_text_micro(2, 58, "MID: PACKETS  L/R: CHANNEL");
+    gfx_text_micro(2, 58, a0_filter ? "MID:PKTS  LONGR:CLR FILTER"
+                                     : "MID:PKTS  L/R:CH  LONGR:A0");
+    display_flush();
+}
+
+void ui_sniff_hex(uint8_t val)
+{
+    char buf[6];
+    buf[0] = '0'; buf[1] = 'x';
+    buf[2] = hex_digits[val >> 4];
+    buf[3] = hex_digits[val & 0xF];
+    buf[4] = '\0';
+
+    display_clear();
+    gfx_text_micro((DISP_W - gfx_text_micro_width("SET A0 FILTER")) / 2, 2, "SET A0 FILTER");
+    gfx_hline(0, DISP_W - 1, 9);
+    gfx_text_micro(4, 20, "<");
+    gfx_text((DISP_W - gfx_text_width(buf)) / 2, 17, buf);
+    gfx_text_micro(DISP_W - 8, 20, ">");
+    gfx_hline(0, DISP_W - 1, 30);
+    gfx_text_micro(2, 35, "L/R  ADJUST");
+    gfx_text_micro(2, 43, "MID  CONFIRM");
+    gfx_text_micro(2, 51, "LONG R  CANCEL");
     display_flush();
 }
 

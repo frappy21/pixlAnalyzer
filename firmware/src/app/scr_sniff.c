@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "buttons.h"
 #include "screens.h"
 #include "settings.h"
 #include "ui.h"
@@ -35,6 +36,11 @@ static uint16_t m_lock;
 static uint16_t m_hop_mhz = 2400;
 static uint32_t m_redraw_ms;
 
+// A0 filter: 0 = accept any, 1..255 = accept only this first address byte
+static uint8_t m_a0_filter;
+static bool m_hex_editing;
+static uint8_t m_hex_val;
+
 extern const app_screen_t scr_sniff_pkt;
 
 static void sniff_enter(void)
@@ -42,6 +48,9 @@ static void sniff_enter(void)
     esb_sniff_init(g_app_arena, SNIFF_ARENA_BYTES);
     m_hop_mhz = 2400;
     m_redraw_ms = 0;
+    m_a0_filter = 0;
+    m_hex_editing = false;
+    m_hex_val = 0x55;
 }
 
 // One slice of listening, shared by the list and the browser
@@ -49,7 +58,11 @@ static void listen(uint32_t now)
 {
     uint16_t mhz = m_lock ? m_lock : m_hop_mhz;
     uint16_t end = mhz + SNIFF_SLICE_MHZ - 1;
-    esb_sniff_run(mhz, end, SNIFF_DWELL_MS, g_settings.sniff_rate, g_settings.sniff_bits != 0);
+    if (m_a0_filter)
+        esb_sniff_run_a0(mhz, end, SNIFF_DWELL_MS, g_settings.sniff_rate,
+                         g_settings.sniff_bits != 0, &m_a0_filter, 1);
+    else
+        esb_sniff_run(mhz, end, SNIFF_DWELL_MS, g_settings.sniff_rate, g_settings.sniff_bits != 0);
     if (!m_lock)
     {
         m_hop_mhz = m_hop_mhz >= 2483 ? 2400 : (uint16_t)(m_hop_mhz + 1);
@@ -65,6 +78,41 @@ static void listen(uint32_t now)
 static void sniff_tick(uint32_t now)
 {
     listen(now);
+
+    if (m_hex_editing)
+    {
+        if (app_left())  { m_hex_val--; app_redraw(); }
+        if (app_right()) { m_hex_val++; app_redraw(); }
+        if (buttons_long(BTN_RIGHT)) { app_note_input(); m_hex_editing = false; app_redraw(); }
+        if (app_ok())
+        {
+            m_a0_filter = m_hex_val;
+            m_hex_editing = false;
+            esb_sniff_reset();
+            app_redraw();
+        }
+        if (app_take_redraw())
+            ui_sniff_hex(m_hex_val);
+        return;
+    }
+
+    // Long RIGHT: toggle A0 filter
+    if (buttons_long(BTN_RIGHT))
+    {
+        app_note_input();
+        if (m_a0_filter)
+        {
+            m_a0_filter = 0;
+            esb_sniff_reset();
+        }
+        else
+        {
+            m_hex_val = 0x55;
+            m_hex_editing = true;
+        }
+        app_redraw();
+        return;
+    }
 
     // HOP, 2400, 2401, ... 2483, HOP
     if (app_left())
@@ -84,7 +132,7 @@ static void sniff_tick(uint32_t now)
     }
 
     if (app_take_redraw())
-        ui_sniff_list(m_lock, m_hop_mhz, esb_sniff_locks(), esb_sniff_decoded());
+        ui_sniff_list(m_lock, m_hop_mhz, esb_sniff_locks(), esb_sniff_decoded(), m_a0_filter);
 }
 
 const app_screen_t scr_sniff = {

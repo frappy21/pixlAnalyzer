@@ -30,6 +30,11 @@ typedef struct
     const char *mw_verdict;
     const uint8_t *mw_trend; // recent levels, older first
     uint8_t mw_trend_len;
+
+    // FHSS follow mode
+    bool follow;
+    uint16_t follow_start; // MHz (inclusive)
+    uint16_t follow_end;   // MHz (inclusive)
 } radar_view_t;
 
 const char *radar_mode_name(uint8_t mode);
