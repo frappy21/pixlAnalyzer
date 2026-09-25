@@ -8,6 +8,7 @@
 #include "buttons.h"
 #include "channels.h"
 #include "display.h"
+#include "font3x5.h"
 #include "gfx.h"
 #include "power.h"
 #include "scanner.h"
@@ -25,6 +26,8 @@ static const char *tool_name(uint8_t tool)
     {
     case TOOL_MARK:
         return "MARK";
+    case TOOL_PEAK:
+        return "PEAK";
     case TOOL_SPAN:
         return "SPAN";
     case TOOL_WFALL:
@@ -145,60 +148,215 @@ void ui_low_battery(void)
 // Scanner
 // ---------------------------------------------------------------------------
 
+// Layout of the scanner screen below the status bar: the plot (h 0 for none),
+// the ruler line and the waterfall (rows 0 for none)
+typedef struct
+{
+    uint8_t plot_top;
+    uint8_t plot_h;
+    uint8_t ruler_y;
+    uint8_t wf_top;
+    uint8_t wf_rows;
+} scanner_geom_t;
+
+static const scanner_geom_t geom[LAYOUT_COUNT] = {
+    [LAYOUT_SPLIT] = {SPECTRUM_TOP, SPECTRUM_H, RULER_Y, WATERFALL_START, WATERFALL_ROWS},
+    [LAYOUT_SPECTRUM] = {STATUS_H, DISP_H - STATUS_H - RULER_H, DISP_H - RULER_H, 0, 0},
+    [LAYOUT_WATERFALL] = {0, 0, STATUS_H, STATUS_H + RULER_H, DISP_H - STATUS_H - RULER_H},
+};
+
+uint8_t ui_scanner_waterfall_rows(uint8_t layout)
+{
+    return layout < LAYOUT_COUNT ? geom[layout].wf_rows : 0;
+}
+
+const char *ui_layout_name(uint8_t layout)
+{
+    switch (layout)
+    {
+    case LAYOUT_SPECTRUM:
+        return "SPECT";
+    case LAYOUT_WATERFALL:
+        return "WFALL";
+    default:
+        return "SPLIT";
+    }
+}
+
+// Signed figure with an explicit plus, then a unit
+static int text_signed(int x, int y, int value, const char *unit)
+{
+    char buf[12];
+    char *p = buf;
+    if (value >= 0)
+        *p++ = '+';
+    gfx_fmt_int(p, value);
+    gfx_text_micro(x, y, buf);
+    x += gfx_text_micro_width(buf) + 1;
+    gfx_text_micro(x, y, unit);
+    return x + gfx_text_micro_width(unit);
+}
+
+// Channel index of an absolute frequency, -1 when it is not swept
+static int chan_of_mhz(uint16_t mhz)
+{
+    for (uint8_t i = 0; i < scanner_count(); i++)
+    {
+        if (scanner_mhz(i) == mhz)
+            return i;
+    }
+    return -1;
+}
+
 static void scanner_status_bar(const scanner_view_t *view)
 {
     char buf[16];
 
-    // Left: sweeps per second, the honest measure of how much air we see
-    gfx_fmt_int(buf, (int)view->sweeps_s);
-    int x = 0;
-    gfx_text_micro(x, 1, buf);
-    x += gfx_text_micro_width(buf) + 3;
-    gfx_text_micro(x, 1, "HZ");
-    x += gfx_text_micro_width("HZ") + 5;
-
-    // Middle: current tool, or the frozen marker
-    gfx_text_micro(x, 1, view->frozen ? "FROZEN" : tool_name(view->tool));
-
-    // Marker readout: frequency and level
     uint8_t idx = spectrum_col_to_chan(view->marker_col);
     uint16_t mhz = scanner_mhz(idx);
+    int level = 0;
+    bool has_level = spectrum_level_dbm(idx, &level);
+
+    if (view->delta_mhz && !view->tool_hint && !view->frozen)
+    {
+        // Left: marker minus reference, in MHz and dB. The calibration
+        // offset cancels out of the difference.
+        int x = text_signed(0, 1, (int)mhz - (int)view->delta_mhz, "M");
+        int ref = chan_of_mhz(view->delta_mhz);
+        int ref_level = 0;
+        if (has_level && ref >= 0 && spectrum_level_dbm((uint8_t)ref, &ref_level))
+            text_signed(x + 3, 1, level - ref_level, "DB");
+        else
+            gfx_text_micro(x + 3, 1, "--DB");
+    }
+    else
+    {
+        // Left: sweeps per second, the honest measure of how much air we see
+        gfx_fmt_int(buf, (int)view->sweeps_s);
+        int x = 0;
+        gfx_text_micro(x, 1, buf);
+        x += gfx_text_micro_width(buf) + 3;
+        gfx_text_micro(x, 1, "HZ");
+        x += gfx_text_micro_width("HZ") + 5;
+
+        // Middle: current tool, or the frozen marker
+        gfx_text_micro(x, 1, view->frozen ? "FROZEN" : tool_name(view->tool));
+    }
+
+    // Marker readout: frequency and calibrated level
     gfx_fmt_int(buf, mhz);
     gfx_text_micro(46, 1, buf);
 
-    uint8_t peak = g_scan[idx].peak;
-    if (peak != RSSI_INVALID)
+    if (has_level)
     {
-        char *p = buf;
-        *p++ = '-';
-        gfx_fmt_int(p, peak);
+        gfx_fmt_int(buf, level);
         gfx_text_micro(72, 1, buf);
     }
 
-    // Right edge, x=104 onwards for "+4.12V": clear of the level at x=72
+    // Trace and RBW when they are not the defaults: AV, MN, 2M
+    char *p = buf;
+    if (spectrum_trace() == TRACE_AVG)
+    {
+        *p++ = 'A';
+        *p++ = 'V';
+    }
+    else if (spectrum_trace() == TRACE_MIN)
+    {
+        *p++ = 'M';
+        *p++ = 'N';
+    }
+    if (spectrum_rbw() == 2)
+    {
+        *p++ = '2';
+        *p++ = 'M';
+    }
+    *p = '\0';
+    gfx_text_micro(88, 1, buf);
+
+    // Right edge, x=104 onwards for "+4.12V": clear of the tags at x=88
     ui_battery();
+}
+
+// Marker and delta marker over the waterfall, when there is no plot for them
+static void waterfall_markers(const scanner_geom_t *g, int marker_col, int delta_col)
+{
+    for (int y = g->wf_top; y < g->wf_top + g->wf_rows; y++)
+    {
+        int phase = (y - g->wf_top) & 3;
+        if (phase == 0 && marker_col >= 0)
+            gfx_pixel(marker_col, y, !gfx_pixel_get(marker_col, y));
+        if (phase == 2 && delta_col >= 0)
+            gfx_pixel(delta_col, y, !gfx_pixel_get(delta_col, y));
+    }
+}
+
+// Inverted banner: which channel is how far above its floor
+static void alarm_banner(const scanner_view_t *view, int y)
+{
+    char buf[24];
+    char *p = buf;
+    memcpy(p, "ALARM ", 6);
+    p += 6;
+    gfx_fmt_int(p, scanner_mhz(view->alarm_chan));
+    while (*p)
+        p++;
+    *p++ = ' ';
+    *p++ = '+';
+    gfx_fmt_int(p, view->alarm_db);
+    while (*p)
+        p++;
+    memcpy(p, "DB", 3);
+
+    int w = gfx_text_micro_width(buf);
+    int x = DISP_W - 2 - w;
+    gfx_box(x - 1, y - 1, w + 2, MICRO_HEIGHT + 2, true, false);
+    gfx_text_micro(x, y, buf);
+    gfx_invert(x - 1, y - 1, w + 2, MICRO_HEIGHT + 2);
 }
 
 void ui_scanner(const scanner_view_t *view)
 {
+    const scanner_geom_t *g = &geom[view->layout < LAYOUT_COUNT ? view->layout : LAYOUT_SPLIT];
+
     display_clear();
 
     scanner_status_bar(view);
-    spectrum_draw(view->marker_col);
-    spectrum_draw_ruler(view->plan, view->marker_col);
-    spectrum_draw_waterfall(view->scroll_back);
 
-    // Scroll position indicator on the right edge of the waterfall
-    if (view->scroll_back)
+    int delta_col = -1;
+    if (view->delta_mhz)
     {
-        uint16_t rows = spectrum_history_rows();
-        if (rows > WATERFALL_ROWS)
+        int ref = chan_of_mhz(view->delta_mhz);
+        if (ref >= 0)
+            delta_col = spectrum_chan_to_col((uint8_t)ref);
+    }
+
+    if (g->plot_h)
+    {
+        spectrum_draw_plot(g->plot_top, g->plot_h, view->marker_col, delta_col);
+        spectrum_draw_db_labels(g->plot_top, g->plot_h);
+    }
+    spectrum_draw_ruler_at(g->ruler_y, view->plan, view->marker_col);
+
+    if (g->wf_rows)
+    {
+        spectrum_draw_waterfall_rows(g->wf_top, g->wf_rows, view->scroll_back);
+        if (!g->plot_h)
+            waterfall_markers(g, view->marker_col, delta_col);
+
+        // Scroll position indicator on the right edge of the waterfall
+        if (view->scroll_back)
         {
-            int y = WATERFALL_START +
-                    (int)((uint32_t)view->scroll_back * (WATERFALL_ROWS - 1) / rows);
-            gfx_vline(DISP_W - 1, y, y + 1);
+            uint16_t rows = spectrum_history_rows();
+            if (rows > g->wf_rows)
+            {
+                int y = g->wf_top + (int)((uint32_t)view->scroll_back * (g->wf_rows - 1) / rows);
+                gfx_vline(DISP_W - 1, y, y + 1);
+            }
         }
     }
+
+    if (view->alarm)
+        alarm_banner(view, (g->plot_h ? g->plot_top : g->wf_top) + 1);
 
     display_flush();
 }
@@ -258,6 +416,7 @@ void ui_top_channels(void)
 
     display_clear();
     ui_title("BUSIEST");
+    gfx_text_micro(60, 2, "LAST 30S");
 
     for (uint8_t i = 0; i < n; i++)
     {
@@ -271,13 +430,14 @@ void ui_top_channels(void)
         if (label[0])
             gfx_text_micro(26, y, label);
 
-        // Occupancy bar, 0..255 mapped to 60 pixels
-        int w = (g_scan[idx[i]].busy * 60) / 255;
+        // Long window occupancy, 0..100 mapped to 60 pixels
+        uint8_t occ = spectrum_occupancy(idx[i]);
+        int w = (occ * 60) / 100;
         gfx_box(44, y, 62, 5, false, true);
         if (w > 0)
             gfx_box(45, y + 1, w, 3, true, true);
 
-        gfx_fmt_int(buf, (g_scan[idx[i]].busy * 100) / 255);
+        gfx_fmt_int(buf, occ);
         gfx_text_micro(110, y, buf);
     }
 
@@ -320,9 +480,7 @@ void ui_meter(uint16_t mhz, uint8_t rssi, uint8_t db, const uint8_t *trend, uint
     }
     else
     {
-        char *p = buf;
-        *p++ = '-';
-        gfx_fmt_int(p, rssi);
+        gfx_fmt_int(buf, spectrum_dbm(rssi)); // calibrated
         gfx_text(4, 14, buf);
         gfx_text(4 + gfx_text_width(buf) + 4, 14, "dBm");
     }

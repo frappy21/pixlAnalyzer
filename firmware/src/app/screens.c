@@ -13,6 +13,13 @@
     X(act_freeze)          \
     X(act_set_ref)         \
     X(act_clear_max)       \
+    X(act_view)            \
+    X(act_trace)           \
+    X(act_rbw)             \
+    X(act_delta)           \
+    X(act_cal)             \
+    X(act_alarm)           \
+    X(act_dwell)           \
     X(scr_identify)        \
     X(scr_ble)             \
     X(scr_ble_detail)      \

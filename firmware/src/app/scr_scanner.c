@@ -1,6 +1,10 @@
 /**
  * Home screen (the scanner) plus the screens and menu actions that work on
- * the same sweep: Busiest, Meter, Overlay, Freeze, Set ref, Clear max.
+ * the same sweep: Busiest, Meter, Overlay, Freeze, Set ref, Clear max, View,
+ * Trace, RBW, Delta mkr, Cal offset, Alarm, Adapt dwell.
+ *
+ * The options set from here are session only (static variables, defaults
+ * after every boot); nothing new goes into the settings record.
  */
 #include <string.h>
 
@@ -8,6 +12,7 @@
 #include "buttons.h"
 #include "channels.h"
 #include "display.h"
+#include "gfx.h"
 #include "led.h"
 #include "scanner.h"
 #include "screens.h"
@@ -23,10 +28,28 @@ static scanner_view_t m_view = {
     .frozen = false,
     .plan = PLAN_WIFI,
     .sweeps_s = 0,
+    .layout = LAYOUT_SPLIT,
 };
 
 static uint32_t m_sweep_count;
 static uint32_t m_sweep_window_ms;
+
+// Peak tool: rank of the peak the marker was last sent to, -1 for none yet
+static int8_t m_peak_rank = -1;
+
+// With the delta readout in the status bar, the tool name comes back for a
+// moment after the tool changes
+#define TOOL_HINT_MS 1500
+static uint32_t m_tool_hint_until;
+
+// Interference alarm: threshold in dB over the floor, 0 is off. Once raised
+// it stays up ALARM_HOLD_MS after the last sweep that exceeded it, so a
+// single burst is still readable.
+#define ALARM_HOLD_MS 1500
+#define ALARM_LED_RATE 8 // blinks per second while up
+static const uint8_t alarm_levels[] = {0, 10, 15, 20, 30};
+static uint8_t m_alarm_sel;
+static uint32_t m_alarm_until;
 
 // Meter trend ring
 static uint8_t m_trend[DISP_W - 4];
@@ -84,6 +107,23 @@ static void tool_adjust(int direction)
             m_view.marker_col = DISP_W - 1;
         break;
 
+    case TOOL_PEAK:
+    {
+        // RIGHT: the next lower peak, back to the strongest after the last.
+        // LEFT: the next higher one, stopping at the strongest.
+        int rank = direction > 0 ? m_peak_rank + 1 : (m_peak_rank > 0 ? m_peak_rank - 1 : 0);
+        uint8_t idx;
+        if (!spectrum_find_peak((uint8_t)rank, &idx))
+        {
+            rank = 0;
+            if (!spectrum_find_peak(0, &idx))
+                break; // nothing stands out, the marker stays
+        }
+        m_peak_rank = (int8_t)rank;
+        m_view.marker_col = spectrum_chan_to_col(idx);
+        break;
+    }
+
     case TOOL_SPAN:
     {
         // Zoom around the marker. This buys pixels per MHz and sweeps per
@@ -128,8 +168,11 @@ static void tool_adjust(int direction)
         if (back < 0)
             back = 0;
         uint16_t rows = spectrum_history_rows();
-        if (rows > WATERFALL_ROWS && back > rows - WATERFALL_ROWS)
-            back = rows - WATERFALL_ROWS;
+        uint8_t shown = ui_scanner_waterfall_rows(m_view.layout);
+        if (shown == 0)
+            shown = WATERFALL_ROWS; // no waterfall on screen, keep the usual bound
+        if (rows > shown && back > rows - shown)
+            back = rows - shown;
         m_view.scroll_back = (uint16_t)back;
         m_view.frozen = (m_view.scroll_back != 0);
         break;
@@ -143,6 +186,51 @@ static void tool_adjust(int direction)
 static void scanner_enter(void)
 {
     m_sweep_window_ms = systime_ms();
+}
+
+static void scanner_leave(void)
+{
+    if (m_view.alarm)
+        led_off();
+    m_view.alarm = false;
+    m_alarm_until = 0;
+}
+
+// Raises the interference alarm on a fresh sweep and drops it once the hold
+// time has run out, frozen or not
+static void alarm_check(uint32_t now, bool fresh)
+{
+    uint8_t thr = alarm_levels[m_alarm_sel];
+    if (thr && fresh)
+    {
+        uint8_t idx = spectrum_strongest();
+        uint8_t db = spectrum_db(idx);
+        if (db >= thr)
+        {
+            // Keep the strongest offender of the episode on the banner
+            if (!m_view.alarm || db >= m_view.alarm_db || idx == m_view.alarm_chan)
+            {
+                m_view.alarm_chan = idx;
+                m_view.alarm_db = db;
+            }
+            m_alarm_until = now + ALARM_HOLD_MS;
+        }
+    }
+
+    bool up = thr && (int32_t)(m_alarm_until - now) > 0;
+    if (up != m_view.alarm)
+    {
+        m_view.alarm = up;
+        if (!up)
+            led_off();
+        app_redraw();
+    }
+    if (up)
+    {
+        // Set on every pass: the Meter turns the LED off when it closes
+        led_set_rate(ALARM_LED_RATE);
+        led_update(now);
+    }
 }
 
 static void scanner_tick(uint32_t now)
@@ -164,6 +252,7 @@ static void scanner_tick(uint32_t now)
         if (systime_ms() - last_draw_ms >= SCANNER_FRAME_MS)
             app_redraw();
     }
+    alarm_check(now, !m_view.frozen);
 
     // Clicks only: the long presses switch screens and open the menu
     if (app_left())
@@ -186,11 +275,15 @@ static void scanner_tick(uint32_t now)
             m_view.scroll_back = 0;
             m_view.frozen = false;
         }
+        if (m_view.tool == TOOL_PEAK)
+            m_peak_rank = -1; // the first RIGHT goes to the strongest
+        m_tool_hint_until = now + TOOL_HINT_MS;
         app_redraw();
     }
 
     if (app_take_redraw())
     {
+        m_view.tool_hint = (int32_t)(m_tool_hint_until - now) > 0;
         ui_scanner(&m_view);
         last_draw_ms = systime_ms();
     }
@@ -206,6 +299,7 @@ const app_screen_t scr_scanner = {
     .group = APP_GROUP_SPECTRUM,
     .enter = scanner_enter,
     .tick = scanner_tick,
+    .leave = scanner_leave,
     .busy = true,
 };
 
@@ -360,7 +454,7 @@ const app_screen_t act_set_ref = {
 
 static void clear_max_action(void)
 {
-    spectrum_clear_max();
+    spectrum_clear_max(); // min hold too
     app_open(&scr_scanner); // straight to Spectrum to watch it build up again
 }
 
@@ -368,4 +462,161 @@ const app_screen_t act_clear_max = {
     .name = "Clear max",
     .group = APP_GROUP_SPECTRUM,
     .action = clear_max_action,
+};
+
+static void view_action(void)
+{
+    m_view.layout = (uint8_t)((m_view.layout + 1) % LAYOUT_COUNT);
+
+    // A taller waterfall reaches less far back
+    uint16_t rows = spectrum_history_rows();
+    uint8_t shown = ui_scanner_waterfall_rows(m_view.layout);
+    if (shown && rows > shown && m_view.scroll_back > rows - shown)
+        m_view.scroll_back = rows - shown;
+}
+
+static const char *view_value(void)
+{
+    return ui_layout_name(m_view.layout);
+}
+
+const app_screen_t act_view = {
+    .name = "View",
+    .group = APP_GROUP_SPECTRUM,
+    .action = view_action,
+    .value = view_value,
+};
+
+static void trace_action(void)
+{
+    spectrum_set_trace((uint8_t)((spectrum_trace() + 1) % TRACE_COUNT));
+}
+
+static const char *trace_value(void)
+{
+    return spectrum_trace_name(spectrum_trace());
+}
+
+const app_screen_t act_trace = {
+    .name = "Trace",
+    .group = APP_GROUP_SPECTRUM,
+    .action = trace_action,
+    .value = trace_value,
+};
+
+static void rbw_action(void)
+{
+    spectrum_set_rbw(spectrum_rbw() == 1 ? 2 : 1);
+}
+
+static const char *rbw_value(void)
+{
+    return spectrum_rbw() == 2 ? "2MHZ" : "1MHZ";
+}
+
+const app_screen_t act_rbw = {
+    .name = "RBW",
+    .group = APP_GROUP_SPECTRUM,
+    .action = rbw_action,
+    .value = rbw_value,
+};
+
+static void delta_action(void)
+{
+    // Anchors the reference at the marker; the marker then moves on its own
+    m_view.delta_mhz = m_view.delta_mhz ? 0 : scr_scanner_marker_mhz();
+}
+
+static const char *delta_value(void)
+{
+    static char buf[8];
+    if (!m_view.delta_mhz)
+        return "OFF";
+    gfx_fmt_int(buf, m_view.delta_mhz);
+    return buf;
+}
+
+const app_screen_t act_delta = {
+    .name = "Delta mkr",
+    .group = APP_GROUP_SPECTRUM,
+    .action = delta_action,
+    .value = delta_value,
+};
+
+// Steps of 2 dB: the radio's own RSSI accuracy is +-2 dB, a finer step would
+// pretend to more than it can deliver
+#define CAL_STEP_DB 2
+
+static void cal_action(void)
+{
+    int next = spectrum_cal() + CAL_STEP_DB;
+    if (next > SPECTRUM_CAL_MAX_DB)
+        next = SPECTRUM_CAL_MIN_DB;
+    spectrum_set_cal((int8_t)next);
+}
+
+static const char *cal_value(void)
+{
+    static char buf[8];
+    char *p = buf;
+    if (spectrum_cal() > 0)
+        *p++ = '+';
+    gfx_fmt_int(p, spectrum_cal());
+    while (*p)
+        p++;
+    memcpy(p, "DB", 3);
+    return buf;
+}
+
+const app_screen_t act_cal = {
+    .name = "Cal offset",
+    .group = APP_GROUP_SPECTRUM,
+    .action = cal_action,
+    .value = cal_value,
+};
+
+static void alarm_action(void)
+{
+    m_alarm_sel = (uint8_t)((m_alarm_sel + 1) % sizeof(alarm_levels));
+    if (!alarm_levels[m_alarm_sel] && m_view.alarm)
+    {
+        m_view.alarm = false;
+        led_off();
+    }
+    m_alarm_until = 0;
+}
+
+static const char *alarm_value(void)
+{
+    static char buf[8];
+    uint8_t thr = alarm_levels[m_alarm_sel];
+    if (!thr)
+        return "OFF";
+    gfx_fmt_int(buf, thr);
+    memcpy(buf + strlen(buf), "DB", 3);
+    return buf;
+}
+
+const app_screen_t act_alarm = {
+    .name = "Alarm",
+    .group = APP_GROUP_SPECTRUM,
+    .action = alarm_action,
+    .value = alarm_value,
+};
+
+static void dwell_action(void)
+{
+    scanner_set_adaptive(!scanner_adaptive());
+}
+
+static const char *dwell_value(void)
+{
+    return scanner_adaptive() ? "ON" : "OFF";
+}
+
+const app_screen_t act_dwell = {
+    .name = "Adapt dwell",
+    .group = APP_GROUP_SPECTRUM,
+    .action = dwell_action,
+    .value = dwell_value,
 };
