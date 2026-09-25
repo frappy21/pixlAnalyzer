@@ -25,6 +25,7 @@ extern uint32_t __isr_vector;
 static bool m_woke_from_sleep;
 static bool m_watchdog_running;
 static uint32_t m_reset_reason;
+static bool m_crash_boot; // this boot follows a crash nobody has seen yet
 
 static void noinit_boot(void);
 static void stack_guard_init(void);
@@ -77,7 +78,7 @@ const char *power_reset_reason_name(void)
     // Checked in the order that matters: a crash, a brownout or a watchdog
     // reset means something is wrong, waking from SYSTEM OFF is normal. The
     // crash catcher resets with SYSRESETREQ, which alone would read SOFT.
-    if (power_crash_fresh())
+    if (m_crash_boot)
         return "CRASH";
     if (m_reset_reason & POWER_RESETREAS_DOG_Msk)
         return "WATCHDOG";
@@ -233,6 +234,8 @@ static void noinit_boot(void)
 
     m_noinit.run_base_s = m_noinit.run_s;
     noinit_seal();
+
+    m_crash_boot = power_crash_fresh();
 }
 
 void power_runtime_update(uint32_t uptime_s)
@@ -441,6 +444,17 @@ uint32_t power_stack_unused(void)
 uint32_t power_ram_gap(void)
 {
     return (uint32_t)((uint8_t *)&__StackLimit - (uint8_t *)&__bss_end__);
+}
+
+// ---------------------------------------------------------------------------
+// Clocks
+// ---------------------------------------------------------------------------
+
+void power_hfxo_release(void)
+{
+    // Back to the internal RC oscillator. The radio must be disabled; the
+    // next radio_hfxo_start() brings the crystal back.
+    NRF_CLOCK->TASKS_HFCLKSTOP = 1;
 }
 
 // ---------------------------------------------------------------------------

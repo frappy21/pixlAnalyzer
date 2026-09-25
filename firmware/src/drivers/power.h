@@ -88,6 +88,10 @@ uint32_t power_ram_gap(void);      // RAM between the static variables and the s
 // Misc
 // ---------------------------------------------------------------------------
 
+// Stops the 64MHz crystal between radio bursts (sentry mode). The radio must
+// be disabled first; radio_hfxo_start() restarts it.
+void power_hfxo_release(void);
+
 // Die temperature from the TEMP peripheral, in 0.25 degree C steps
 int32_t power_temperature_q2(void);
 
