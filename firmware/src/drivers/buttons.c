@@ -18,6 +18,9 @@ typedef struct
     bool raw;           // last sampled level, active low already inverted
     bool stable;        // debounced level
     bool pressed_event; // set on the falling (press) edge, cleared when read
+    bool click_event;   // released before the long threshold, cleared when read
+    bool long_event;    // held past the long threshold, cleared when read
+    bool long_fired;    // this press already produced its long event
     bool ignore;        // press was consumed elsewhere, wait for release
     uint32_t changed_at;
     uint32_t pressed_at;
@@ -47,6 +50,10 @@ void buttons_init(void)
         m_buttons[i].raw = level;
         m_buttons[i].stable = level;
         m_buttons[i].ignore = false;
+        m_buttons[i].pressed_event = false;
+        m_buttons[i].click_event = false;
+        m_buttons[i].long_event = false;
+        m_buttons[i].long_fired = level; // the wake press is neither long nor a click
         m_buttons[i].changed_at = now;
         m_buttons[i].pressed_at = now;
     }
@@ -66,25 +73,34 @@ void buttons_poll(void)
             // Bouncing, restart the settling window
             b->raw = level;
             b->changed_at = now;
-            continue;
+        }
+        else if (level != b->stable && (now - b->changed_at) >= DEBOUNCE_MS)
+        {
+            // Stable for long enough, accept the new level
+            b->stable = level;
+            if (level)
+            {
+                b->pressed_at = now;
+                b->next_repeat = now + REPEAT_DELAY_MS;
+                b->pressed_event = !b->ignore;
+                b->long_fired = false;
+            }
+            else
+            {
+                // A click is a press that ended before it became a long one
+                if (!b->ignore && !b->long_fired)
+                    b->click_event = true;
+                b->ignore = false;
+            }
         }
 
-        if (level == b->stable || (now - b->changed_at) < DEBOUNCE_MS)
+        // The long event fires once, the moment the threshold is crossed, and
+        // only while the pin still reads down (not on a late seen release)
+        if (b->stable && b->raw && !b->ignore && !b->long_fired &&
+            (now - b->pressed_at) >= BUTTONS_LONG_MS)
         {
-            continue;
-        }
-
-        // Stable for long enough, accept the new level
-        b->stable = level;
-        if (level)
-        {
-            b->pressed_at = now;
-            b->next_repeat = now + REPEAT_DELAY_MS;
-            b->pressed_event = !b->ignore;
-        }
-        else
-        {
-            b->ignore = false;
+            b->long_fired = true;
+            b->long_event = true;
         }
     }
 }
@@ -110,6 +126,24 @@ bool buttons_pressed(button_t btn)
         return false;
 
     m_buttons[btn].pressed_event = false;
+    return true;
+}
+
+bool buttons_clicked(button_t btn)
+{
+    if (!m_buttons[btn].click_event)
+        return false;
+
+    m_buttons[btn].click_event = false;
+    return true;
+}
+
+bool buttons_long(button_t btn)
+{
+    if (!m_buttons[btn].long_event)
+        return false;
+
+    m_buttons[btn].long_event = false;
     return true;
 }
 
@@ -144,6 +178,8 @@ void buttons_flush(void)
     for (int i = 0; i < BTN_COUNT; i++)
     {
         m_buttons[i].pressed_event = false;
+        m_buttons[i].click_event = false;
+        m_buttons[i].long_event = false;
         m_buttons[i].ignore = m_buttons[i].stable;
     }
 }

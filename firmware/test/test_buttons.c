@@ -79,6 +79,62 @@ int main(void) {
     press(PIN_BTN_MID, 1); advance(100, 5);
     check("next real press works", buttons_pressed(BTN_MID), 1);
 
+    // Case 7: a short click fires on release only, never on the press edge
+    memset(g_level, 0, sizeof(g_level)); buttons_init();
+    press(PIN_BTN_MID, 1); advance(200, 5);
+    check("short click: nothing while still held", buttons_clicked(BTN_MID), 0);
+    check("short click: no long event while held", buttons_long(BTN_MID), 0);
+    press(PIN_BTN_MID, 0); advance(60, 5);
+    check("short click fires on release", buttons_clicked(BTN_MID), 1);
+    check("short click fires only once", buttons_clicked(BTN_MID), 0);
+    check("short click produces no long event", buttons_long(BTN_MID), 0);
+
+    // Case 8: a long press fires once at the threshold and suppresses the click
+    press(PIN_BTN_MID, 1);
+    int longs = 0;
+    uint32_t held_at_long = 0;
+    for (int i = 0; i < 400; i++)
+    {
+        advance(5, 5);
+        if (buttons_long(BTN_MID)) { longs++; if (!held_at_long) held_at_long = buttons_held_ms(BTN_MID); }
+    }
+    check("long press fires exactly once while held 2s", longs, 1);
+    printf("  info long event after %u ms of (debounced) holding\n", (unsigned)held_at_long);
+    check("long press fires at BUTTONS_LONG_MS",
+          held_at_long >= BUTTONS_LONG_MS && held_at_long < BUTTONS_LONG_MS + 10, 1);
+    press(PIN_BTN_MID, 0); advance(60, 5);
+    check("release after long press: no click", buttons_clicked(BTN_MID), 0);
+    check("release after long press: no second long", buttons_long(BTN_MID), 0);
+
+    // Case 9: a press held when the state changes (flush) gives neither event
+    press(PIN_BTN_MID, 1); advance(100, 5);
+    buttons_flush();
+    advance(1000, 5);
+    check("flushed press: no long event", buttons_long(BTN_MID), 0);
+    press(PIN_BTN_MID, 0); advance(60, 5);
+    check("flushed press: no click on release", buttons_clicked(BTN_MID), 0);
+
+    // Case 10: the wake press held at boot is neither long nor a click
+    memset(g_level, 0, sizeof(g_level));
+    press(PIN_BTN_MID, 1); buttons_init();
+    advance(1000, 5);
+    check("held-at-boot: no long event", buttons_long(BTN_MID), 0);
+    press(PIN_BTN_MID, 0); advance(60, 5);
+    check("held-at-boot: no click on release", buttons_clicked(BTN_MID), 0);
+
+    // Case 11: LEFT/RIGHT repeat is unchanged by the click/long logic
+    memset(g_level, 0, sizeof(g_level)); buttons_init();
+    press(PIN_BTN_LEFT, 1); advance(40, 5);
+    repeats = 0;
+    if (buttons_repeat(BTN_LEFT)) repeats++;
+    check("left: first repeat fires on the press edge", repeats, 1);
+    for (int i = 0; i < 100; i++) { advance(10, 5); if (buttons_repeat(BTN_LEFT)) repeats++; }
+    check("left: auto repeat rate is 4-12 per second", repeats >= 5 && repeats <= 13, 1);
+    press(PIN_BTN_LEFT, 0); advance(60, 5);
+    int after = 0;
+    for (int i = 0; i < 20; i++) { advance(10, 5); if (buttons_repeat(BTN_LEFT)) after++; }
+    check("left: no repeat after release", after, 0);
+
     printf("\n%s (%d failures)\n", failures ? "FAILED" : "ALL PASS", failures);
     return failures != 0;
 }
