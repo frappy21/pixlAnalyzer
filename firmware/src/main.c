@@ -273,6 +273,8 @@ int main(void)
     if (g_settings.home_screen && g_settings.home_screen < g_app_home_count)
         app_home_select(g_app_home[g_settings.home_screen]);
 
+    app_open(&scr_menu);
+
     while (1)
     {
         buttons_poll();
@@ -289,56 +291,17 @@ int main(void)
         }
 #endif
 
-        // Global long presses. On a main screen: long LEFT/RIGHT switch to
-        // the previous/next main screen (and keep switching while held: the
-        // spin), long MID opens the menu. Anywhere else a long LEFT closes
-        // whatever is open.
-        static uint8_t spin;    // 0 none, 1 left, 2 right
-        static uint32_t spin_ms;
-
-        if (app_at_home())
+        // Global long presses: long MID opens the menu from anywhere,
+        // long LEFT closes any sub-screen and returns to home.
+        if (buttons_long(BTN_MID))
         {
-            if (buttons_long(BTN_LEFT))
-            {
-                app_note_input();
-                app_home_switch(-1);
-                spin = 1;
-                spin_ms = now + 400;
-            }
-            else if (buttons_long(BTN_RIGHT))
-            {
-                app_note_input();
-                app_home_switch(1);
-                spin = 2;
-                spin_ms = now + 400;
-            }
-            else if (buttons_long(BTN_MID))
-            {
-                app_note_input();
-                app_open(&scr_menu);
-            }
-            else if (spin)
-            {
-                // The hold continues: keep spinning through the screens
-                bool held = spin == 1 ? buttons_down(BTN_LEFT) : buttons_down(BTN_RIGHT);
-                if (!held)
-                    spin = 0;
-                else if ((int32_t)(now - spin_ms) >= 0)
-                {
-                    spin_ms = now + 120;
-                    app_note_input();
-                    app_home_switch(spin == 1 ? -1 : 1);
-                }
-            }
+            app_note_input();
+            app_open(&scr_menu);
         }
-        else
+        else if (buttons_long(BTN_LEFT))
         {
-            spin = 0;
-            if (buttons_long(BTN_LEFT))
-            {
-                app_note_input();
-                app_back();
-            }
+            app_note_input();
+            app_back();
         }
 
         const app_screen_t *screen = app_current();
