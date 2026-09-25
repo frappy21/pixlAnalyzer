@@ -181,6 +181,10 @@ $(foreach target, $(TARGETS), $(call define_target, $(target)))
 flash: $(VARIANT)
 	tools/flash_jlink.sh $(VARIANT)
 
+# Same, through OpenOCD (J-Link by default, OPENOCD_IF=... for another probe)
+flash-openocd: $(VARIANT)
+	tools/flash_openocd.sh $(VARIANT)
+
 # The settings page on its own, e.g. to inspect it before flashing
 settings: $(VARIANT)
 	python3 tools/mkblsettings.py $(OUTPUT_DIRECTORY)/$(VARIANT).bin \
