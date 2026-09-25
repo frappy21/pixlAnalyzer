@@ -45,12 +45,11 @@ enum
 static const uint16_t count_values[] = {0, 1, 8, 32, 128};
 #define COUNT_CHOICES 5
 
-// Injection payload sources: a raw pattern, or one of the Unifying frames
-// for keystroke testing on one's own receiver
+// Injection payload source: a raw pattern
 static const char *const src_names[] = {
-    "PATTERN", "KEY A", "KEY RET", "KEY ESC", "RELEASE", "KEEP-A",
+    "PATTERN",
 };
-#define SRC_CHOICES 6
+#define SRC_CHOICES 1
 
 #define REPLAY_GAP_US 2000
 
@@ -69,34 +68,13 @@ static uint8_t m_src;           // injection payload source
 static uint8_t m_plen = 8;
 static uint8_t m_payload[ESB_MAX_PAYLOAD];
 
-// Loads the selected payload source into m_payload
+// Loads the selected payload source into m_payload (pattern only)
 static void src_load(void)
 {
     memset(m_payload, 0, sizeof(m_payload));
-
-    switch (m_src)
-    {
-    case 1:
-        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x04);
-        break;
-    case 2:
-        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x28);
-        break;
-    case 3:
-        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x29);
-        break;
-    case 4:
-        m_plen = unify_build_release(m_payload, ESB_MAX_PAYLOAD, 0x00);
-        break;
-    case 5:
-        m_plen = unify_build_keepalive(m_payload, ESB_MAX_PAYLOAD, 0x00);
-        break;
-    default:
-        for (uint8_t i = 0; i < ESB_MAX_PAYLOAD; i++)
-            m_payload[i] = i;
-        m_plen = 8;
-        break;
-    }
+    for (uint8_t i = 0; i < ESB_MAX_PAYLOAD; i++)
+        m_payload[i] = i;
+    m_plen = 8;
 }
 
 // The editor cursor: nibble index into m_payload, 0..2*plen-1

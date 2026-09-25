@@ -33,15 +33,11 @@ SRC_FILES += \
   src/app/channels.c \
   src/app/classify.c \
   src/app/scr_intro.c \
-  src/app/scr_jam.c \
-  src/app/scr_log.c \
   src/app/scr_nfc.c \
   src/app/scr_radar.c \
   src/app/scr_rc.c \
-  src/app/scr_rc_tx.c \
   src/app/ui_radar.c \
   src/app/ui_rc.c \
-  src/app/scr_beacon.c \
   src/app/scr_ble.c \
   src/app/scr_ble_sensors.c \
   src/app/scr_esb.c \
@@ -59,7 +55,6 @@ SRC_FILES += \
   src/app/settings.c \
   src/app/spectrum.c \
   src/app/ui.c \
-  src/app/ui_beacon.c \
   src/app/ui_ble.c \
   src/app/ui_esb.c \
   src/app/ui_esb_tx.c \
@@ -82,12 +77,9 @@ SRC_FILES += \
   src/gfx/font5x7.c \
   src/gfx/gfx.c \
   src/radio/ble_adv.c \
-  src/radio/ble_beacon.c \
   src/radio/ble_devtab.c \
   src/radio/ble_scan.c \
   src/radio/ble_sensor.c \
-  src/radio/jam.c \
-  src/radio/log_store.c \
   src/radio/nfc_ndef.c \
   src/radio/nfc_tag.c \
   src/radio/radar.c \
@@ -249,10 +241,6 @@ test:
 	        test/test_esb.c src/radio/esb_frame.c src/radio/esb_sniff.c -DESB_SNIFF_HOST_TEST \
 	        -o $(OUTPUT_DIRECTORY)/test_esb
 	@$(OUTPUT_DIRECTORY)/test_esb
-	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
-	        test/test_beacon.c src/radio/ble_beacon.c src/radio/ble_adv.c src/radio/ble_sensor.c -DBLE_BEACON_HOST_TEST \
-	        -o $(OUTPUT_DIRECTORY)/test_beacon
-	@$(OUTPUT_DIRECTORY)/test_beacon
 	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
 		test/test_rc.c src/radio/rc_proto.c -o $(OUTPUT_DIRECTORY)/test_rc
 	@$(OUTPUT_DIRECTORY)/test_rc

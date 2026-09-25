@@ -7,7 +7,6 @@
 
 #include "app_config.h"
 #include "battery.h"
-#include "ble_beacon.h"
 #include "display.h"
 #include "gfx.h"
 #include "scanner.h"
@@ -58,10 +57,7 @@ enum
 
     SET_SENTRY_DB,
     SET_SENTRY_MS,
-    SET_BEACON,
-    SET_BEACONINT,
     SET_BATCAL,
-    SET_NORLOG,
 
     SET_COUNT
 };
@@ -94,10 +90,8 @@ static const uint8_t c_r_radio[] = {SET_PAGE, SET_BAND,   SET_DWELL,  SET_WFSPEE
 static const char *c_l_behavior[] = {"Page", "LED hunt", "Dim s", "Sleep m", "Start screen", "Back"};
 static const uint8_t c_r_behavior[] = {SET_PAGE, SET_LED, SET_DIM, SET_SLEEP, SET_HOME, SET_BACK};
 
-static const char *c_l_tools[] = {"Page",     "Sentry dB", "Sentry ms", "Beacon",
-                                  "Beacon int", "Batt cal",  "NOR log",   "Back"};
-static const uint8_t c_r_tools[] = {SET_PAGE, SET_SENTRY_DB, SET_SENTRY_MS, SET_BEACON,
-                                    SET_BEACONINT, SET_BATCAL, SET_NORLOG, SET_BACK};
+static const char *c_l_tools[] = {"Page", "Sentry dB", "Sentry ms", "Batt cal", "Back"};
+static const uint8_t c_r_tools[] = {SET_PAGE, SET_SENTRY_DB, SET_SENTRY_MS, SET_BATCAL, SET_BACK};
 
 #define PAGE_DEF(labels, rows) \
     {                          \
@@ -210,21 +204,8 @@ static void row_value(uint8_t row, char *storage, const char **out)
     case SET_SENTRY_MS:
         *out = gfx_fmt_int(storage, g_settings.sentry_period * 100);
         break;
-    case SET_BEACON:
-        *out = ble_beacon_name(g_settings.beacon_type);
-        break;
-    case SET_BEACONINT:
-        *out = gfx_fmt_int(
-            storage,
-            (int)ble_beacon_intervals[g_settings.beacon_int < BLE_BEACON_INTV_COUNT
-                                          ? g_settings.beacon_int
-                                          : 0]);
-        break;
     case SET_BATCAL:
         *out = gfx_fmt_int(storage, g_settings.bat_cal);
-        break;
-    case SET_NORLOG:
-        *out = g_settings.log_consent ? "ON" : "OFF";
         break;
     default:
         break;
@@ -349,21 +330,6 @@ static void settings_adjust(int dir)
         g_settings.sentry_period = (uint8_t)(v < 1 ? 1 : (v > 50 ? 50 : v));
         break;
     }
-    case SET_BEACON:
-    {
-        int v = g_settings.beacon_type + dir;
-        g_settings.beacon_type =
-            (uint8_t)(v < 0 ? BLE_BEACON_TYPE_COUNT - 1
-                            : (v >= BLE_BEACON_TYPE_COUNT ? 0 : v));
-        break;
-    }
-    case SET_BEACONINT:
-    {
-        int v = g_settings.beacon_int + dir;
-        g_settings.beacon_int = (uint8_t)(v < 0 ? BLE_BEACON_INTV_COUNT - 1
-                                                : (v >= BLE_BEACON_INTV_COUNT ? 0 : v));
-        break;
-    }
     case SET_BATCAL:
     {
         int v = g_settings.bat_cal + dir * 5;
@@ -375,9 +341,6 @@ static void settings_adjust(int dir)
         battery_set_calibration(g_settings.bat_cal);
         break;
     }
-    case SET_NORLOG:
-        g_settings.log_consent = !g_settings.log_consent;
-        break;
     default:
         return;
     }

@@ -19,7 +19,6 @@
 #include "app.h"
 #include "gfx.h"
 #include "led.h"
-#include "log_store.h"
 #include "radar.h"
 #include "scanner.h"
 #include "screens.h"
@@ -106,8 +105,6 @@ static void hunt_check(void)
         {
             m_alert = true;
             m_alert_ms = 0;
-            if (g_settings.log_consent)
-                log_store_event(LOG_TYPE_HUNT, s->mhz, s->peak_db);
         }
     }
 }
@@ -132,8 +129,6 @@ static void measure_microwave(void)
             memmove(m_mw_trend, m_mw_trend + 1, MW_TREND - 1);
             m_mw_trend[MW_TREND - 1] = (uint8_t)(level > 0 ? level : 0);
         }
-        if (g_settings.log_consent && level >= 20)
-            log_store_event(LOG_TYPE_SENTRY, 2450, (uint8_t)level);
     }
 }
 

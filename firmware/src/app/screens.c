@@ -42,13 +42,9 @@
     X(scr_tx)              \
     X(scr_esb_tx)          \
     X(scr_esb_payload)     \
-    X(scr_rc_tx)           \
-    X(scr_jam)             \
-    X(scr_beacon)          \
     X(scr_settings)        \
     X(scr_presets)         \
     X(scr_sentry)          \
-    X(scr_log)             \
     X(scr_info)            \
     X(scr_help)            \
     X(act_sleep)           \
