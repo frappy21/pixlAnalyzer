@@ -47,6 +47,7 @@ SRC_FILES += \
   src/app/ui_esb.c \
   src/app/ui_info.c \
   src/app/ui_tx.c \
+  src/app/version.c \
   src/drivers/battery.c \
   src/drivers/buttons.c \
   src/drivers/display.c \
@@ -101,6 +102,13 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin -fshort-enums
 CFLAGS += -DBOARD_CUSTOM
 CFLAGS += -Wall -Wextra -Wno-unused-parameter
+
+# Firmware identity (src/app/version.c): the release number, bumped by hand,
+# and the commit the image was built from, "+" appended for a dirty tree
+FW_VERSION := 1.1
+FW_GIT_HASH := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
+FW_GIT_DIRTY := $(shell git status --porcelain --untracked-files=no 2>/dev/null | grep -q . && echo 1 || echo 0)
+CFLAGS += -DFW_VERSION=\"$(FW_VERSION)\" -DFW_GIT_HASH=\"$(FW_GIT_HASH)\" -DFW_GIT_DIRTY=$(FW_GIT_DIRTY)
 
 CXXFLAGS += $(OPT)
 ASMFLAGS += -g3
@@ -192,6 +200,15 @@ TEMPLATE_PATH := $(SDK_ROOT)/components/toolchain/gcc
 include $(TEMPLATE_PATH)/Makefile.common
 
 $(foreach target, $(TARGETS), $(call define_target, $(target)))
+
+# The build does not track flags, so version.c depends on a stamp that only
+# changes when the identity does: a new commit rebuilds one file, not all
+FW_ID := $(FW_VERSION) $(FW_GIT_HASH) $(FW_GIT_DIRTY)
+$(OUTPUT_DIRECTORY)/fw_id.stamp: FORCE
+	@mkdir -p $(@D)
+	@echo '$(FW_ID)' | cmp -s - $@ || echo '$(FW_ID)' > $@
+$(foreach target, $(TARGETS), $(OUTPUT_DIRECTORY)/$(target)/version.c.o): $(OUTPUT_DIRECTORY)/fw_id.stamp
+FORCE:
 
 .PHONY: flash settings packages test
 
