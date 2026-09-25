@@ -23,6 +23,9 @@ static uint8_t m_dwell = SCAN_DWELL_SAMPLES_DEFAULT;
 static bool m_shuffle = true;
 static uint16_t m_lcg = 0xACE1; // visit order randomiser, seeded deterministically
 
+// Park mode feeds the watchdog this often, far inside its 8s timeout
+#define PARK_WDT_FEED_US 100000u
+
 // Bounded waits: a radio that never raises its event must not hang the UI
 static bool wait_event(volatile uint32_t *event)
 {
@@ -37,10 +40,20 @@ static bool wait_event(volatile uint32_t *event)
     return false;
 }
 
-void scanner_init(void)
+void radio_disable(void)
 {
+    if ((NRF_RADIO->STATE & RADIO_STATE_STATE_Msk) ==
+        (RADIO_STATE_STATE_Disabled << RADIO_STATE_STATE_Pos))
+        return;
+
+    NRF_RADIO->EVENTS_DISABLED = 0;
     NRF_RADIO->TASKS_DISABLE = 1;
     wait_event(&NRF_RADIO->EVENTS_DISABLED);
+}
+
+void scanner_init(void)
+{
+    radio_disable();
 
     NRF_RADIO->POWER = 1;
     NRF_RADIO->MODE = (RADIO_MODE_MODE_Ble_1Mbit << RADIO_MODE_MODE_Pos);
@@ -64,11 +77,10 @@ void scanner_init(void)
 
 void scanner_stop(void)
 {
-    NRF_RADIO->TASKS_DISABLE = 1;
-    wait_event(&NRF_RADIO->EVENTS_DISABLED);
+    radio_disable();
 }
 
-static void hfclk_start_xtal(void)
+void radio_hfxo_start(void)
 {
     if ((NRF_CLOCK->HFCLKSTAT & (CLOCK_HFCLKSTAT_SRC_Msk | CLOCK_HFCLKSTAT_STATE_Msk)) ==
         (CLOCK_HFCLKSTAT_SRC_Xtal << CLOCK_HFCLKSTAT_SRC_Pos |
@@ -232,7 +244,7 @@ void scanner_sweep(void)
     if (m_count == 0)
         return;
 
-    hfclk_start_xtal();
+    radio_hfxo_start();
 
     if (!m_shuffle)
     {
@@ -266,7 +278,7 @@ uint8_t scanner_measure(uint16_t mhz, uint8_t samples)
     if (!tune_for(mhz, &t))
         return RSSI_INVALID;
 
-    hfclk_start_xtal();
+    radio_hfxo_start();
     radio_tune(&t);
 
     NRF_RADIO->EVENTS_READY = 0;
@@ -300,7 +312,7 @@ uint16_t scanner_park(uint16_t mhz, uint32_t window_ms, burst_t *out, uint16_t m
     if (!tune_for(mhz, &t) || max_bursts == 0)
         return 0;
 
-    hfclk_start_xtal();
+    radio_hfxo_start();
     radio_tune(&t);
 
     NRF_RADIO->EVENTS_READY = 0;
@@ -308,24 +320,25 @@ uint16_t scanner_park(uint16_t mhz, uint32_t window_ms, burst_t *out, uint16_t m
     if (!wait_event(&NRF_RADIO->EVENTS_READY))
         return 0;
 
-    // Learn the floor from the first samples, then trigger above it
-    uint8_t floor_est = 0;
-    for (int i = 0; i < 64; i++)
+    // Trigger above the noise floor the sweep has tracked for this channel.
+    // Learning it here from the first samples would take a steady carrier for
+    // the floor and never see a burst on top of it.
+    uint8_t floor_est = NOISE_FLOOR_INIT;
+    for (uint8_t i = 0; i < m_count; i++)
     {
-        NRF_RADIO->EVENTS_RSSIEND = 0;
-        NRF_RADIO->TASKS_RSSISTART = 1;
-        if (!wait_event(&NRF_RADIO->EVENTS_RSSIEND))
+        if (m_mhz[i] == mhz)
+        {
+            floor_est = g_floor[i];
             break;
-        uint8_t v = NRF_RADIO->RSSISAMPLE & RADIO_RSSISAMPLE_RSSISAMPLE_Msk;
-        if (v > floor_est)
-            floor_est = v;
+        }
     }
-    if (floor_est < NOISE_FLOOR_MIN)
+    if (floor_est < NOISE_FLOOR_MIN || floor_est > NOISE_FLOOR_MAX)
         floor_est = NOISE_FLOOR_INIT;
 
     uint8_t thr = (floor_est > SIGNAL_MARGIN_DB) ? floor_est - SIGNAL_MARGIN_DB : 0;
 
     uint32_t t_start = systime_us();
+    uint32_t last_feed = t_start;
     uint32_t deadline_us = window_ms * 1000u;
     uint16_t count = 0;
     uint16_t dropped = 0;
@@ -380,8 +393,31 @@ uint16_t scanner_park(uint16_t mhz, uint32_t window_ms, burst_t *out, uint16_t m
             }
         }
 
-        if ((count & 0x3F) == 0)
+        // Feed on elapsed time: a count based test stops feeding as soon as
+        // bursts start being recorded
+        if ((now - last_feed) >= PARK_WDT_FEED_US)
+        {
             power_watchdog_feed();
+            last_feed = now;
+        }
+    }
+
+    // A burst still open when the window ends counts up to the last sample
+    if (in_burst)
+    {
+        uint32_t len = now - burst_start;
+        on_us += len;
+        if (count < max_bursts)
+        {
+            out[count].start_us = burst_start - t_start;
+            out[count].len_us = len > 0xFFFF ? 0xFFFF : (uint16_t)len;
+            out[count].peak = burst_peak;
+            count++;
+        }
+        else
+        {
+            dropped++;
+        }
     }
 
     NRF_RADIO->EVENTS_DISABLED = 0;

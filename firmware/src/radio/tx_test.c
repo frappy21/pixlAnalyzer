@@ -34,16 +34,7 @@ bool tx_test_start(uint16_t mhz, uint8_t power)
     tx_test_stop();
 
     // The HFXO must be running for a clean carrier
-    if ((NRF_CLOCK->HFCLKSTAT & CLOCK_HFCLKSTAT_STATE_Msk) == 0)
-    {
-        NRF_CLOCK->EVENTS_HFCLKSTARTED = 0;
-        NRF_CLOCK->TASKS_HFCLKSTART = 1;
-        for (uint32_t guard = 0; guard < 1000000; guard++)
-        {
-            if (NRF_CLOCK->EVENTS_HFCLKSTARTED)
-                break;
-        }
-    }
+    radio_hfxo_start();
 
     NRF_RADIO->SHORTS = 0;
     NRF_RADIO->MODE = RADIO_MODE_MODE_Ble_1Mbit << RADIO_MODE_MODE_Pos;

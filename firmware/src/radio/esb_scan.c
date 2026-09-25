@@ -36,8 +36,7 @@ void esb_scan_init(void) { esb_scan_reset(); }
 
 static void radio_promiscuous(uint8_t freq, uint8_t rate)
 {
-    NRF_RADIO->TASKS_DISABLE = 1;
-    wait_event(&NRF_RADIO->EVENTS_DISABLED, 200000);
+    radio_disable();
 
     NRF_RADIO->MODE = (rate == 2 ? RADIO_MODE_MODE_Nrf_2Mbit : RADIO_MODE_MODE_Nrf_1Mbit)
                       << RADIO_MODE_MODE_Pos;
@@ -124,6 +123,8 @@ uint8_t esb_scan_run(uint16_t start_mhz, uint16_t end_mhz, uint16_t dwell_ms)
 {
     if (end_mhz < start_mhz)
         return m_count;
+
+    radio_hfxo_start();
 
     for (uint16_t mhz = start_mhz; mhz <= end_mhz; mhz++)
     {

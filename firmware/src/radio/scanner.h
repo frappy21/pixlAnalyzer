@@ -46,6 +46,15 @@ extern uint8_t g_floor[SCAN_MAX_CHANNELS]; // tracked noise floor per channel
 void scanner_init(void);
 void scanner_stop(void);
 
+// Starts the HFXO unless the crystal is already the running HFCLK source.
+// TIMER0 keeps HFINT running, so STATE alone reads Running without the
+// crystal; every radio entry point calls this before tuning.
+void radio_hfxo_start(void);
+
+// Disables the radio and waits for DISABLED, skipping the wait when it is
+// already disabled (the event never fires in that case).
+void radio_disable(void);
+
 // Sets the swept range in MHz, clamped to what the radio can tune
 // (2360..2500 with FREQUENCY.MAP, 2400..2500 otherwise)
 void scanner_set_span(uint16_t start_mhz, uint16_t end_mhz);

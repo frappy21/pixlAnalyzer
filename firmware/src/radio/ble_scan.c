@@ -15,6 +15,12 @@ static const uint8_t adv_index[3] = {37, 38, 39};
 #define BLE_CRC_POLY 0x0000065Bu
 #define BLE_CRC_INIT 0x00555555u
 
+// Advertising channel PDU types that are AdvA + AD data
+#define PDU_ADV_IND 0x00
+#define PDU_ADV_NONCONN_IND 0x02
+#define PDU_SCAN_RSP 0x04
+#define PDU_ADV_SCAN_IND 0x06
+
 // AD types we care about
 #define AD_FLAGS 0x01
 #define AD_UUID16_SOME 0x02
@@ -68,8 +74,7 @@ void ble_scan_init(void)
 
 static void radio_configure(uint8_t chan_index, uint8_t freq)
 {
-    NRF_RADIO->TASKS_DISABLE = 1;
-    wait_event(&NRF_RADIO->EVENTS_DISABLED, 200000);
+    radio_disable();
 
     NRF_RADIO->MODE = RADIO_MODE_MODE_Ble_1Mbit << RADIO_MODE_MODE_Pos;
     NRF_RADIO->MODECNF0 = (RADIO_MODECNF0_RU_Fast << RADIO_MODECNF0_RU_Pos) |
@@ -145,7 +150,8 @@ static void parse_ad(ble_dev_t *dev, const uint8_t *ad, int len)
     while (pos + 1 < len)
     {
         int field_len = ad[pos];
-        if (field_len == 0 || pos + field_len >= len + 1)
+        // The field occupies ad[pos .. pos + field_len], all inside the payload
+        if (field_len == 0 || pos + field_len >= len)
             break;
 
         uint8_t type = ad[pos + 1];
@@ -229,10 +235,13 @@ static void handle_packet(int8_t rssi, uint32_t now_ms)
     uint8_t pdu_type = header & 0x0F;
     uint8_t tx_add = (header >> 6) & 1;
 
-    // Only advertising PDUs that start with an advertiser address
+    // Only advertising PDUs that carry AdvA followed by AD data. ADV_DIRECT_IND,
+    // SCAN_REQ and CONNECT_IND have a second address or LL data after AdvA, so
+    // they still count as packets but never enter the device table.
     if (length < 6 || length > 37)
         return;
-    if (pdu_type > 0x06)
+    if (pdu_type != PDU_ADV_IND && pdu_type != PDU_ADV_NONCONN_IND &&
+        pdu_type != PDU_SCAN_RSP && pdu_type != PDU_ADV_SCAN_IND)
         return;
 
     const uint8_t *addr = &m_pdu[2];
@@ -256,6 +265,8 @@ uint16_t ble_scan_run(uint32_t window_ms)
     uint32_t per_channel = window_ms / 3;
     if (per_channel == 0)
         per_channel = 1;
+
+    radio_hfxo_start();
 
     for (int c = 0; c < 3; c++)
     {
