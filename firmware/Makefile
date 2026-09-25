@@ -28,11 +28,25 @@ SRC_FILES += \
 # Application
 SRC_FILES += \
   src/main.c \
+  src/app/app.c \
   src/app/channels.c \
   src/app/classify.c \
+  src/app/scr_ble.c \
+  src/app/scr_esb.c \
+  src/app/scr_identify.c \
+  src/app/scr_info.c \
+  src/app/scr_menu.c \
+  src/app/scr_scanner.c \
+  src/app/scr_settings.c \
+  src/app/scr_tx.c \
+  src/app/screens.c \
   src/app/settings.c \
   src/app/spectrum.c \
   src/app/ui.c \
+  src/app/ui_ble.c \
+  src/app/ui_esb.c \
+  src/app/ui_info.c \
+  src/app/ui_tx.c \
   src/drivers/battery.c \
   src/drivers/buttons.c \
   src/drivers/display.c \

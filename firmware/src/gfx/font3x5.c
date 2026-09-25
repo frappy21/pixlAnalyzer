@@ -50,6 +50,7 @@ static const uint8_t dot[3] = {0, 16, 0};
 static const uint8_t slash[3] = {16, 14, 1};
 static const uint8_t plus[3] = {4, 14, 4};
 static const uint8_t colon[3] = {0, 10, 0};
+static const uint8_t question[3] = {1, 21, 7};
 
 const uint8_t *font3x5_glyph(char c)
 {
@@ -72,6 +73,8 @@ const uint8_t *font3x5_glyph(char c)
         return plus;
     case ':':
         return colon;
+    case '?':
+        return question;
     default:
         return blank;
     }

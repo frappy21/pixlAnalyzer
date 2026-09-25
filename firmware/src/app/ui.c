@@ -8,14 +8,12 @@
 #include "buttons.h"
 #include "channels.h"
 #include "display.h"
-#include "flash_ext.h"
 #include "gfx.h"
 #include "power.h"
 #include "scanner.h"
 #include "settings.h"
 #include "spectrum.h"
 #include "systime.h"
-#include "tx_test.h"
 #include "ui.h"
 
 #define LIST_ROWS 6
@@ -42,34 +40,34 @@ static const char *tool_name(uint8_t tool)
 // Common furniture
 // ---------------------------------------------------------------------------
 
-static void draw_battery_icon(int x, int y)
+void ui_battery(void)
 {
-    gfx_box(x, y, 12, 7, false, true);
-    gfx_vline(x + 12, y + 2, y + 4);
-
-    if (!g_battery.valid)
-    {
-        gfx_text_micro(x + 3, y + 1, "?");
-        return;
-    }
+    // The voltage itself instead of a gauge: the percentage is a curve fitted
+    // over a reading that sags under load, the volts are what was measured
+    char buf[12];
+    char *p = buf;
 
     if (g_battery.charging)
-    {
-        // Lightning bolt, three strokes wide
-        gfx_vline(x + 6, y + 1, y + 3);
-        gfx_vline(x + 5, y + 3, y + 5);
-        gfx_pixel(x + 7, y + 2, true);
-        return;
-    }
+        *p++ = '+';
 
-    int fill = (g_battery.percent * 10) / 100;
-    if (fill > 10)
-        fill = 10;
-    if (fill > 0)
-        gfx_box(x + 1, y + 1, fill, 5, true, true);
+    if (g_battery.valid)
+    {
+        gfx_fmt_fixed(p, (g_battery.mv + 5) / 10, 2);
+        while (*p)
+            p++;
+    }
+    else
+    {
+        memcpy(p, "?.??", 4);
+        p += 4;
+    }
+    *p++ = 'V';
+    *p = '\0';
+
+    gfx_text_micro(DISP_W - 1 - gfx_text_micro_width(buf), 1, buf);
 }
 
-static void draw_title(const char *title)
+void ui_title(const char *title)
 {
     gfx_text(2, 1, title);
     gfx_hline(0, DISP_W - 1, 9);
@@ -177,7 +175,8 @@ static void scanner_status_bar(const scanner_view_t *view)
         gfx_text_micro(72, 1, buf);
     }
 
-    draw_battery_icon(DISP_W - 14, 0);
+    // Right edge, x=104 onwards for "+4.12V": clear of the level at x=72
+    ui_battery();
 }
 
 void ui_scanner(const scanner_view_t *view)
@@ -212,7 +211,7 @@ void ui_list(const char *title, const char *const *items, uint8_t count, uint8_t
              const char *const *values)
 {
     display_clear();
-    draw_title(title);
+    ui_title(title);
 
     uint8_t first = 0;
     if (selected >= LIST_ROWS)
@@ -248,66 +247,6 @@ void ui_list(const char *title, const char *const *items, uint8_t count, uint8_t
 }
 
 // ---------------------------------------------------------------------------
-// Info and diagnostics
-// ---------------------------------------------------------------------------
-
-void ui_info(uint32_t uptime_s, uint32_t sweeps, uint16_t history_rows)
-{
-    char buf[20];
-    display_clear();
-    draw_title("INFO");
-
-    gfx_text_micro(2, 12, "RESET");
-    gfx_text_micro(34, 12, power_reset_reason_name());
-
-    gfx_text_micro(2, 21, "UPTIME");
-    gfx_fmt_int(buf, (int)uptime_s);
-    gfx_text_micro(46, 21, buf);
-    gfx_text_micro(46 + gfx_text_micro_width(buf) + 2, 21, "S");
-
-    gfx_text_micro(2, 28, "SWEEPS");
-    gfx_fmt_int(buf, (int)sweeps);
-    gfx_text_micro(46, 28, buf);
-
-    gfx_text_micro(2, 35, "HISTORY");
-    gfx_fmt_int(buf, history_rows);
-    gfx_text_micro(46, 35, buf);
-    gfx_text_micro(46 + gfx_text_micro_width(buf) + 2, 35, "ROWS");
-
-    gfx_text_micro(2, 42, "BATTERY");
-    gfx_fmt_fixed(buf, g_battery.mv, 3);
-    gfx_text_micro(46, 42, buf);
-    gfx_text_micro(46 + gfx_text_micro_width(buf) + 2, 42, "V");
-    gfx_fmt_int(buf, g_battery.percent);
-    gfx_text_micro(78, 42, buf);
-    gfx_text_micro(78 + gfx_text_micro_width(buf) + 1, 42, "PCT");
-
-    // Raw numbers, so a gauge that reads wrong can be calibrated against a
-    // multimeter with the BATT CAL setting
-    gfx_text_micro(2, 49, "ADC RAW");
-    gfx_fmt_int(buf, g_battery.raw_adc);
-    gfx_text_micro(46, 49, buf);
-    gfx_fmt_fixed(buf, g_battery.mv_raw, 3);
-    gfx_text_micro(70, 49, buf);
-    gfx_text_micro(70 + gfx_text_micro_width(buf) + 2, 49, "V");
-
-    gfx_text_micro(2, 56, "FLASH");
-    if (flash_ext_present())
-    {
-        gfx_fmt_int(buf, (int)(flash_ext_size() / 1024));
-        gfx_text_micro(46, 56, buf);
-        gfx_text_micro(46 + gfx_text_micro_width(buf) + 2, 56, "KB");
-    }
-    else
-    {
-        gfx_text_micro(46, 56, "NONE");
-    }
-
-    gfx_text_micro(80, 56, "ATC1441");
-    display_flush();
-}
-
-// ---------------------------------------------------------------------------
 // Top channels and the WiFi advisor
 // ---------------------------------------------------------------------------
 
@@ -318,7 +257,7 @@ void ui_top_channels(void)
     uint8_t n = spectrum_top_busy(idx, 5);
 
     display_clear();
-    draw_title("BUSIEST");
+    ui_title("BUSIEST");
 
     for (uint8_t i = 0; i < n; i++)
     {
@@ -371,7 +310,7 @@ void ui_meter(uint16_t mhz, uint8_t rssi, uint8_t db, const uint8_t *trend, uint
     gfx_fmt_int(buf, mhz);
     gfx_text(2, 1, buf);
     gfx_text(2 + gfx_text_width(buf) + 3, 1, "MHz");
-    draw_battery_icon(DISP_W - 14, 0);
+    ui_battery();
     gfx_hline(0, DISP_W - 1, 9);
 
     // Big level readout, drawn as a wide bar plus the number
@@ -417,7 +356,7 @@ void ui_identify_progress(uint16_t mhz, uint8_t percent)
 {
     char buf[16];
     display_clear();
-    draw_title("IDENTIFY");
+    ui_title("IDENTIFY");
 
     gfx_fmt_int(buf, mhz);
     gfx_text(30, 20, buf);
@@ -494,230 +433,5 @@ void ui_identify(uint16_t mhz, const verdict_t *v, bool ble_confirmed, uint16_t 
     gfx_hline(0, DISP_W - 1, 53);
     gfx_text_micro(2, 57, ble_confirmed ? "CRC CHECKED, NOT A GUESS"
                                         : "PATTERN MATCH, NOT DECODED");
-    display_flush();
-}
-
-// ---------------------------------------------------------------------------
-// BLE
-// ---------------------------------------------------------------------------
-
-void ui_ble_list(uint8_t selected, uint32_t packets)
-{
-    char buf[16];
-    uint8_t idx[BLE_MAX_DEVICES];
-    uint8_t n = ble_scan_sorted(idx, BLE_MAX_DEVICES);
-
-    display_clear();
-    gfx_text(2, 1, "BLE");
-    gfx_fmt_int(buf, ble_scan_count());
-    gfx_text_micro(28, 2, buf);
-    gfx_text_micro(28 + gfx_text_micro_width(buf) + 2, 2, "DEV");
-    gfx_fmt_int(buf, (int)packets);
-    gfx_text_micro(66, 2, buf);
-    gfx_text_micro(66 + gfx_text_micro_width(buf) + 2, 2, "PKT");
-    draw_battery_icon(DISP_W - 14, 0);
-    gfx_hline(0, DISP_W - 1, 9);
-
-    if (n == 0)
-    {
-        gfx_text(14, 28, "LISTENING...");
-        display_flush();
-        return;
-    }
-
-    uint8_t first = 0;
-    if (selected >= 6)
-        first = selected - 5;
-    if (n > 6 && first > n - 6)
-        first = n - 6;
-
-    for (uint8_t row = 0; row < 6 && first + row < n; row++)
-    {
-        const ble_dev_t *d = ble_scan_device(idx[first + row]);
-        int y = 11 + row * 9;
-
-        // Address tail is enough to tell devices apart on a 128px screen
-        static const char hex[] = "0123456789ABCDEF";
-        char mac[6];
-        mac[0] = hex[d->addr[1] >> 4];
-        mac[1] = hex[d->addr[1] & 15];
-        mac[2] = hex[d->addr[0] >> 4];
-        mac[3] = hex[d->addr[0] & 15];
-        mac[4] = '\0';
-        gfx_text_micro(2, y + 1, mac);
-
-        const char *kind = ble_kind_name(d->kind);
-        if (kind[0])
-            gfx_text_micro(22, y + 1, kind);
-        else if (d->name[0])
-            gfx_text_micro(22, y + 1, d->name);
-
-        gfx_fmt_int(buf, -d->rssi);
-        gfx_text_micro(DISP_W - 22, y + 1, buf);
-
-        if (first + row == selected)
-            gfx_invert(0, y, DISP_W, 8);
-    }
-
-    display_flush();
-}
-
-void ui_ble_detail(const ble_dev_t *dev)
-{
-    char buf[20];
-    static const char hex[] = "0123456789ABCDEF";
-
-    display_clear();
-    draw_title("DEVICE");
-
-    char mac[18];
-    int p = 0;
-    for (int i = 5; i >= 0; i--)
-    {
-        mac[p++] = hex[dev->addr[i] >> 4];
-        mac[p++] = hex[dev->addr[i] & 15];
-        if (i)
-            mac[p++] = ':';
-    }
-    mac[p] = '\0';
-    gfx_text_micro(2, 12, mac);
-
-    gfx_text_micro(2, 21, dev->addr_type ? "RANDOM ADDR" : "PUBLIC ADDR");
-
-    if (dev->name[0])
-        gfx_text_micro(2, 29, dev->name);
-
-    const char *kind = ble_kind_name(dev->kind);
-    if (kind[0])
-        gfx_text_micro(70, 29, kind);
-
-    gfx_text_micro(2, 38, "RSSI");
-    gfx_fmt_int(buf, -dev->rssi);
-    gfx_text_micro(34, 38, buf);
-    gfx_text_micro(34 + gfx_text_micro_width(buf) + 2, 38, "DBM");
-
-    gfx_text_micro(70, 38, "PKT");
-    gfx_fmt_int(buf, dev->packets);
-    gfx_text_micro(96, 38, buf);
-
-    // How long it has been around: the number that matters when you are asking
-    // whether something is following you
-    uint32_t seen_s = (dev->last_ms - dev->first_ms) / 1000u;
-    gfx_text_micro(2, 46, "SEEN FOR");
-    gfx_fmt_int(buf, (int)seen_s);
-    gfx_text_micro(50, 46, buf);
-    gfx_text_micro(50 + gfx_text_micro_width(buf) + 2, 46, "S");
-
-    if (dev->company)
-    {
-        gfx_text_micro(2, 54, "COMPANY");
-        buf[0] = hex[(dev->company >> 12) & 15];
-        buf[1] = hex[(dev->company >> 8) & 15];
-        buf[2] = hex[(dev->company >> 4) & 15];
-        buf[3] = hex[dev->company & 15];
-        buf[4] = '\0';
-        gfx_text_micro(50, 54, buf);
-    }
-
-    display_flush();
-}
-
-// ---------------------------------------------------------------------------
-// ShockBurst / nRF24 detection
-// ---------------------------------------------------------------------------
-
-void ui_esb_list(uint32_t total)
-{
-    char buf[16];
-    display_clear();
-
-    gfx_text(2, 1, "MOUSE/KBD");
-    gfx_fmt_int(buf, (int)total);
-    gfx_text_micro(80, 2, buf);
-    gfx_text_micro(80 + gfx_text_micro_width(buf) + 2, 2, "HITS");
-    gfx_hline(0, DISP_W - 1, 9);
-
-    uint8_t n = esb_scan_count();
-    if (n == 0)
-    {
-        gfx_text_micro(2, 20, "NO SHOCKBURST TRAFFIC YET");
-        gfx_text_micro(2, 30, "MOVE THE MOUSE OR TYPE");
-        gfx_text_micro(2, 40, "WHILE THE SCAN RUNS");
-        display_flush();
-        return;
-    }
-
-    for (uint8_t i = 0; i < n && i < 5; i++)
-    {
-        const esb_hit_t *h = esb_scan_hit(i);
-        int y = 11 + i * 9;
-
-        gfx_fmt_int(buf, h->mhz);
-        gfx_text_micro(2, y, buf);
-
-        gfx_fmt_int(buf, h->rate);
-        gfx_text_micro(28, y, buf);
-        gfx_text_micro(28 + gfx_text_micro_width(buf) + 1, y, "M");
-
-        gfx_fmt_int(buf, h->packets);
-        gfx_text_micro(48, y, buf);
-        gfx_text_micro(48 + gfx_text_micro_width(buf) + 2, y, "PKT");
-
-        char *q = buf;
-        *q++ = '-';
-        gfx_fmt_int(q, h->peak_rssi);
-        gfx_text_micro(DISP_W - 24, y, buf);
-    }
-
-    gfx_hline(0, DISP_W - 1, 55);
-    gfx_text_micro(2, 58, "PREAMBLE LOCK, NOT DECODED");
-    display_flush();
-}
-
-// ---------------------------------------------------------------------------
-// Transmitter test
-// ---------------------------------------------------------------------------
-
-void ui_tx_confirm(uint16_t mhz, uint8_t power)
-{
-    char buf[16];
-    display_clear();
-    draw_title("TX TEST");
-
-    gfx_text_micro(2, 12, "TRANSMITS A CARRIER.");
-    gfx_text_micro(2, 20, "CHECK YOUR LOCAL RULES");
-    gfx_text_micro(2, 28, "BEFORE ENABLING IT.");
-
-    gfx_text(2, 38, "FREQ");
-    gfx_fmt_int(buf, mhz);
-    gfx_text(40, 38, buf);
-
-    gfx_text(2, 48, "PWR");
-    gfx_text(40, 48, tx_power_name(power));
-
-    gfx_text_micro(2, 58, "MID HOLD 1S TO START");
-    display_flush();
-}
-
-void ui_tx_active(uint16_t mhz, uint8_t power, uint32_t remaining_ms)
-{
-    char buf[16];
-    display_clear();
-
-    gfx_box(0, 0, DISP_W, 12, true, true);
-    gfx_text(30, 2, "TX ACTIVE");
-    gfx_invert(0, 0, DISP_W, 12);
-
-    gfx_fmt_int(buf, mhz);
-    gfx_text(20, 20, buf);
-    gfx_text(20 + gfx_text_width(buf) + 4, 20, "MHz");
-    gfx_text(20, 32, tx_power_name(power));
-
-    gfx_text_micro(2, 46, "STOPS IN");
-    gfx_fmt_int(buf, (int)(remaining_ms / 1000));
-    gfx_text_micro(44, 46, buf);
-    gfx_text_micro(44 + gfx_text_micro_width(buf) + 2, 46, "S");
-
-    gfx_text_micro(2, 56, "ANY BUTTON STOPS NOW");
     display_flush();
 }
