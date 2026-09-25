@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The Makefile stamps the short commit hash into the image
+          fetch-depth: 1
+
+      - name: Install the ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi make
+          arm-none-eabi-gcc --version
+
+      - name: Build PixlAnalyzerOLED
+        run: make PixlAnalyzerOLED
+
+      - name: Build PixlAnalyzerLCD
+        run: make PixlAnalyzerLCD
+
+      - name: Host tests
+        run: make test
+
+      - name: Upload images
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixlanalyzer-${{ github.sha }}
+          path: |
+            firmware/build/PixlAnalyzerOLED.hex
+            firmware/build/PixlAnalyzerLCD.hex
+            firmware/build/PixlAnalyzerOLED.bin
+            firmware/build/PixlAnalyzerLCD.bin
+          if-no-files-found: error
