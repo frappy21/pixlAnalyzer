@@ -38,6 +38,9 @@ typedef enum
     RC_X5C,
     RC_H8,
     RC_MJX,
+    RC_FLYSKY,  // FlySky AFHDS2A (bind addr 00 05 05 05 05, 1Mbit, 16 bytes)
+    RC_JJRC,    // JJRC H36 / Eachine E010 (same bind addr as Bayang, 2Mbit)
+    RC_WLTOYS,  // WLToys V911S (A0=0x55, 2Mbit, 8 bytes, byte0=0xDD for data)
     RC_PROTO_COUNT_
 } rc_proto_id_t;
 
@@ -52,11 +55,22 @@ typedef struct
 } rc_table_t;
 
 static const rc_table_t c_table[RC_PROTO_COUNT_] = {
-    [RC_BAYANG] = {"BAYANG", {0x00, 0x00, 0x00, 0x00, 0x00}, 0x00, true, 15, 1},
-    [RC_SYMAX] = {"SYMAX", {0xAB, 0xAC, 0xAD, 0xAE, 0xAF}, 0xAB, true, 10, 1},
-    [RC_X5C] = {"X5C", {0x6D, 0x6A, 0x73, 0x73, 0x73}, 0x6D, false, 16, 1},
-    [RC_H8] = {"H8", {0xC4, 0x57, 0x09, 0x65, 0x21}, 0xC4, false, 20, 1},
-    [RC_MJX] = {"MJX", {0x6D, 0x6A, 0x77, 0x77, 0x77}, 0x6D, false, 16, 1},
+    [RC_BAYANG] = {"BAYANG", {0x00, 0x00, 0x00, 0x00, 0x00}, 0x00, true,  15, 1},
+    [RC_SYMAX]  = {"SYMAX",  {0xAB, 0xAC, 0xAD, 0xAE, 0xAF}, 0xAB, true,  10, 1},
+    [RC_X5C]    = {"X5C",    {0x6D, 0x6A, 0x73, 0x73, 0x73}, 0x6D, false, 16, 1},
+    [RC_H8]     = {"H8",     {0xC4, 0x57, 0x09, 0x65, 0x21}, 0xC4, false, 20, 1},
+    [RC_MJX]    = {"MJX",    {0x6D, 0x6A, 0x77, 0x77, 0x77}, 0x6D, false, 16, 1},
+    // FlySky AFHDS2A: bind address 00 05 05 05 05, byte 1 = 0x05 distinguishes
+    // it from Bayang ({00 00 00 00 00}). Data frame: byte 0 = 0xAA, 4 channels
+    // as 16-bit LE at bytes 1-8 (1000-2000 range), XOR checksum at byte 15.
+    [RC_FLYSKY] = {"FLYSKY", {0x00, 0x05, 0x05, 0x05, 0x05}, 0x00, false, 16, 1},
+    // JJRC H36 / Eachine E010: same bind address as Bayang but 2Mbit.
+    // Payload byte 0 = channel index (0-15), sticks at bytes 3-10, additive
+    // checksum of bytes 1-13 at byte 14. rc_proto_refine() detects it.
+    [RC_JJRC]   = {"JJRC",   {0x00, 0x00, 0x00, 0x00, 0x00}, 0x00, true,  15, 2},
+    // WLToys V911S: 2Mbit, 8-byte payload, byte 0 = 0xDD for data frames.
+    // rc_proto_refine() detects it from packets arriving on A0=0x55.
+    [RC_WLTOYS] = {"V911S",  {0x55, 0x55, 0x55, 0x55, 0x55}, 0x55, false, 8,  2},
 };
 
 // The interesting first address bytes the RC receiver should be armed for:
@@ -121,11 +135,23 @@ rc_proto_t rc_proto_by_addr(const uint8_t *addr, uint8_t addr_len)
     if (!addr || addr_len < 2)
         return RC_PROTO_UNKNOWN;
 
+    // FlySky AFHDS2A bind address (00 05 05 05 05) must be checked before
+    // Bayang (00 00 00 00 00): both start with 0x00 but byte 1 differs.
+    if (addr_len >= 2 && addr[0] == 0x00 && addr[1] == 0x05)
+        return RC_FLYSKY;
+
+    // JJRC shares the all-zero Bayang address; rc_proto_refine() tells them
+    // apart once we have the payload. Return Bayang here and refine later.
+
     // Fixed address protocols match on the recovered prefix: the capture
     // may only have validated a shorter address length than the true one,
     // and the prefix still identifies the family.
     for (uint8_t p = 0; p < RC_PROTO_COUNT_; p++)
     {
+        // Skip the ones that need payload to distinguish
+        if (p == RC_JJRC || p == RC_WLTOYS)
+            continue;
+
         // The two 6D 6A families need the third byte to tell apart
         if (p == RC_X5C || p == RC_MJX)
         {
@@ -149,6 +175,26 @@ rc_proto_t rc_proto_by_addr(const uint8_t *addr, uint8_t addr_len)
             return p;
     }
     return RC_PROTO_UNKNOWN;
+}
+
+rc_proto_t rc_proto_refine(rc_proto_t proto, const uint8_t *payload, uint8_t len)
+{
+    if (!payload || !len)
+        return proto;
+
+    // BAYANG data frames start with 0xA5, bind frames with 0xA4/0xA1-0xA3.
+    // JJRC H36 byte 0 is the hop channel index (0x00-0x0F) — not one of
+    // those markers — so we can tell them apart from the first byte alone.
+    if (proto == RC_BAYANG && payload[0] < 0x10)
+        return RC_JJRC;
+
+    // WLToys V911S data frames: 8 bytes, byte 0 = 0xDD.
+    // These arrive on A0=0x55 which is not in the protocol table, so proto
+    // would be UNKNOWN. Detect from payload length and marker.
+    if (proto == RC_PROTO_UNKNOWN && len == 8 && payload[0] == 0xDD)
+        return RC_WLTOYS;
+
+    return proto;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +228,21 @@ uint8_t rc_proto_checksum(rc_proto_t proto, const uint8_t *payload, uint8_t len)
 
     case RC_H8: // additive over 9..18
         for (uint8_t i = 9; i < 19 && i < len; i++)
+            sum += payload[i];
+        return sum;
+
+    case RC_FLYSKY: // XOR over 0..14, placed at byte 15
+        for (uint8_t i = 0; i < 15 && i < len; i++)
+            sum ^= payload[i];
+        return sum;
+
+    case RC_JJRC: // additive over 1..13 (byte 0 is the hop index, not summed)
+        for (uint8_t i = 1; i < 14 && i < len; i++)
+            sum += payload[i];
+        return sum;
+
+    case RC_WLTOYS: // additive over 0..6 for 8-byte frame
+        for (uint8_t i = 0; i < 7 && i < len; i++)
             sum += payload[i];
         return sum;
 
@@ -389,6 +450,72 @@ bool rc_decode(rc_proto_t proto, const uint8_t *payload, uint8_t len, rc_sticks_
         return true;
     }
 
+    case RC_FLYSKY:
+    {
+        // Data frame: [0]=0xAA, [1-2]=AIL LE, [3-4]=ELE LE, [5-6]=THR LE,
+        // [7-8]=RUD LE, channels in 1000-2000 range, [15]=XOR checksum.
+        // Bind frame (byte 0 = 0x00): carry TX ID, not sticks.
+        if (payload[0] != 0xAA)
+            return false; // bind or unknown frame type, not decodable as sticks
+        uint16_t ail = (uint16_t)(payload[1] | (payload[2] << 8));
+        uint16_t ele = (uint16_t)(payload[3] | (payload[4] << 8));
+        uint16_t thr = (uint16_t)(payload[5] | (payload[6] << 8));
+        uint16_t rud = (uint16_t)(payload[7] | (payload[8] << 8));
+        if (ail < 1000) ail = 1000;
+        if (ail > 2000) ail = 2000;
+        if (ele < 1000) ele = 1000;
+        if (ele > 2000) ele = 2000;
+        if (thr < 1000) thr = 1000;
+        if (thr > 2000) thr = 2000;
+        if (rud < 1000) rud = 1000;
+        if (rud > 2000) rud = 2000;
+        out->roll     = (int8_t)((int32_t)(ail - 1500) * 100 / 500);
+        out->pitch    = (int8_t)((int32_t)(ele - 1500) * 100 / 500);
+        out->throttle = (uint8_t)((thr - 1000) * 255u / 1000u);
+        out->yaw      = (int8_t)((int32_t)(rud - 1500) * 100 / 500);
+        return true;
+    }
+
+    case RC_JJRC:
+    {
+        // [0]=hop_ch [1-2]=reserved/mode [3-4]=THR LE [5-6]=RUD LE
+        // [7-8]=ELE LE [9-10]=AIL LE, sticks 0-1000, centre 500 for axes.
+        // [14]=checksum.
+        uint16_t thr = (uint16_t)(payload[3] | (payload[4] << 8));
+        uint16_t rud = (uint16_t)(payload[5] | (payload[6] << 8));
+        uint16_t ele = (uint16_t)(payload[7] | (payload[8] << 8));
+        uint16_t ail = (uint16_t)(payload[9] | (payload[10] << 8));
+        if (thr > 1000) thr = 1000;
+        if (rud > 1000) rud = 1000;
+        if (ele > 1000) ele = 1000;
+        if (ail > 1000) ail = 1000;
+        out->throttle = (uint8_t)(thr * 255u / 1000u);
+        out->yaw      = (int8_t)((int32_t)(rud - 500) * 100 / 500);
+        out->pitch    = (int8_t)((int32_t)(ele - 500) * 100 / 500);
+        out->roll     = (int8_t)((int32_t)(ail - 500) * 100 / 500);
+        if (payload[2] & 0x04)
+            out->flags |= RC_FLAG_FLIP;
+        if (payload[2] & 0x08)
+            out->flags |= RC_FLAG_HEADLESS;
+        if (payload[2] & 0x10)
+            out->flags |= RC_FLAG_RTH;
+        return true;
+    }
+
+    case RC_WLTOYS:
+    {
+        // [0]=0xDD [1]=THR [2]=YAW [3]=PITCH [4]=ROLL [5-6]=flags [7]=csum
+        out->throttle = payload[1];
+        out->yaw      = (int8_t)((int32_t)(payload[2] - 128) * 100 / 127);
+        out->pitch    = (int8_t)((int32_t)(payload[3] - 128) * 100 / 127);
+        out->roll     = (int8_t)((int32_t)(payload[4] - 128) * 100 / 127);
+        if (payload[5] & 0x01)
+            out->flags |= RC_FLAG_FLIP;
+        if (payload[5] & 0x02)
+            out->flags |= RC_FLAG_HEADLESS;
+        return true;
+    }
+
     default:
         return false;
     }
@@ -470,6 +597,45 @@ bool rc_build(rc_proto_t proto, uint8_t *payload, uint8_t len, const rc_sticks_t
         payload[2] = (uint8_t)(s < 0 ? (0x80 + (-s)) : (0x7F - s));
         s = (int16_t)sticks->roll * 127 / 100;
         payload[3] = (uint8_t)(s < 0 ? (0x80 + (-s)) : (0x7F - s));
+        break;
+    }
+
+    case RC_FLYSKY:
+    {
+        uint16_t ail = (uint16_t)(1500 + (int32_t)sticks->roll  * 500 / 100);
+        uint16_t ele = (uint16_t)(1500 + (int32_t)sticks->pitch * 500 / 100);
+        uint16_t thr = (uint16_t)(1000 + (uint32_t)sticks->throttle * 1000u / 255u);
+        uint16_t rud = (uint16_t)(1500 + (int32_t)sticks->yaw   * 500 / 100);
+        payload[0] = 0xAA;
+        payload[1] = (uint8_t)(ail & 0xFF); payload[2] = (uint8_t)(ail >> 8);
+        payload[3] = (uint8_t)(ele & 0xFF); payload[4] = (uint8_t)(ele >> 8);
+        payload[5] = (uint8_t)(thr & 0xFF); payload[6] = (uint8_t)(thr >> 8);
+        payload[7] = (uint8_t)(rud & 0xFF); payload[8] = (uint8_t)(rud >> 8);
+        break;
+    }
+
+    case RC_JJRC:
+    {
+        uint16_t thr = (uint16_t)((uint32_t)sticks->throttle * 1000u / 255u);
+        uint16_t rud = (uint16_t)(500 + (int32_t)sticks->yaw   * 500 / 100);
+        uint16_t ele = (uint16_t)(500 + (int32_t)sticks->pitch * 500 / 100);
+        uint16_t ail = (uint16_t)(500 + (int32_t)sticks->roll  * 500 / 100);
+        payload[3] = (uint8_t)(thr & 0xFF); payload[4] = (uint8_t)(thr >> 8);
+        payload[5] = (uint8_t)(rud & 0xFF); payload[6] = (uint8_t)(rud >> 8);
+        payload[7] = (uint8_t)(ele & 0xFF); payload[8] = (uint8_t)(ele >> 8);
+        payload[9] = (uint8_t)(ail & 0xFF); payload[10] = (uint8_t)(ail >> 8);
+        break;
+    }
+
+    case RC_WLTOYS:
+    {
+        payload[0] = 0xDD;
+        payload[1] = sticks->throttle;
+        payload[2] = (uint8_t)(128 + (int32_t)sticks->yaw   * 127 / 100);
+        payload[3] = (uint8_t)(128 + (int32_t)sticks->pitch * 127 / 100);
+        payload[4] = (uint8_t)(128 + (int32_t)sticks->roll  * 127 / 100);
+        payload[5] = 0;
+        payload[6] = 0;
         break;
     }
 

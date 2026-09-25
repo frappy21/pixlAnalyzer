@@ -125,6 +125,16 @@ static void consume_ring(void)
         m_lock_mhz = p->mhz;
         m_rssi = p->rssi;
 
+        // Refine the protocol guess from the actual payload: same-address
+        // families (BAYANG vs JJRC, unknown vs WLToys) are told apart here.
+        rc_proto_t refined = rc_proto_refine(m_proto, p->f.payload, p->f.plen);
+        if (refined != m_proto)
+        {
+            m_proto = refined;
+            rc_track_start(&m_track, rc_proto_payload_len(m_proto) ?
+                           rc_proto_payload_len(m_proto) : (uint8_t)p->f.plen);
+        }
+
         if (m_proto >= 0)
         {
             rc_sticks_t st;
