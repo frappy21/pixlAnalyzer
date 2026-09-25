@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "buttons.h"
 #include "gfx.h"
 #include "led.h"
 #include "radar.h"
@@ -38,6 +39,11 @@ static radar_work_t *m_work; // the arena
 static uint8_t m_mode; // 0 scan, 1 hunt, 2 microwave
 static bool m_armed;
 static uint8_t m_sel;
+
+// FHSS follow mode: narrows the sweep to the hopper's active channel range
+static bool m_follow;
+static uint16_t m_follow_start;
+static uint16_t m_follow_end;
 
 // The strip values: dB above the floor * 8, one per channel
 static uint8_t m_strip[RADAR_CHANS];
@@ -145,6 +151,7 @@ static void radar_enter(void)
     m_mw_last_ms = 0;
     m_mw_cycle = 0;
     m_alert = false;
+    m_follow = false;
 
     scanner_init();
     scanner_set_span(RADAR_START_MHZ, RADAR_END_MHZ);
@@ -154,8 +161,12 @@ static void radar_enter(void)
 static void radar_leave(void)
 {
     led_off();
-    // The sweep state goes back to the configured band for the other
-    // screens
+    if (m_follow)
+    {
+        scanner_set_dwell(g_settings.dwell);
+        m_follow = false;
+    }
+    // The sweep state goes back to the configured band for the other screens
     scanner_init();
     scr_scanner_apply_band();
 }
@@ -220,6 +231,43 @@ static void radar_tick(uint32_t now)
         app_redraw();
     }
 
+    // Long RIGHT in SCAN mode: enter or exit FHSS follow on the selected HOPPER
+    if (buttons_long(BTN_RIGHT) && m_mode == 0)
+    {
+        app_note_input();
+        if (m_follow)
+        {
+            m_follow = false;
+            scanner_set_span(RADAR_START_MHZ, RADAR_END_MHZ);
+            scanner_set_dwell(g_settings.dwell);
+            app_redraw();
+        }
+        else
+        {
+            uint8_t n = radar_signals(m_work);
+            if (m_sel < n)
+            {
+                const radar_signal_t *s = radar_signal(m_work, m_sel);
+                if (s->kind == RADAR_HOPPER)
+                {
+                    uint16_t half = s->width_mhz / 2;
+                    m_follow_start = s->mhz > RADAR_START_MHZ + half
+                                         ? (uint16_t)(s->mhz - half)
+                                         : RADAR_START_MHZ;
+                    m_follow_end = (uint16_t)(s->mhz + half) < RADAR_END_MHZ
+                                       ? (uint16_t)(s->mhz + half)
+                                       : RADAR_END_MHZ;
+                    m_follow = true;
+                    uint8_t fd = g_settings.dwell <= 63 ? (uint8_t)(g_settings.dwell * 4) : 255;
+                    scanner_set_span(m_follow_start, m_follow_end);
+                    scanner_set_dwell(fd);
+                    ui_message("FOLLOW", "LONG R TO EXIT", 800);
+                    app_redraw();
+                }
+            }
+        }
+    }
+
     if (app_left() && m_mode != 2)
     {
         uint8_t n = radar_signals(m_work);
@@ -249,6 +297,9 @@ static void radar_tick(uint32_t now)
         view.mw_verdict = m_mw_verdict;
         view.mw_trend = m_mw_trend;
         view.mw_trend_len = m_mw_trend_n;
+        view.follow = m_follow;
+        view.follow_start = m_follow_start;
+        view.follow_end = m_follow_end;
         ui_radar(&view);
     }
 }
