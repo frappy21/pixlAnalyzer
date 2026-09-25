@@ -39,6 +39,7 @@ SRC_FILES += \
   src/app/scr_scanner.c \
   src/app/scr_settings.c \
   src/app/scr_tx.c \
+  src/app/scr_zigbee.c \
   src/app/screens.c \
   src/app/settings.c \
   src/app/spectrum.c \
@@ -47,6 +48,7 @@ SRC_FILES += \
   src/app/ui_esb.c \
   src/app/ui_info.c \
   src/app/ui_tx.c \
+  src/app/ui_zigbee.c \
   src/drivers/battery.c \
   src/drivers/buttons.c \
   src/drivers/display.c \
