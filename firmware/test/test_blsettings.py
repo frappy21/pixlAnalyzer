@@ -62,12 +62,20 @@ def main():
 
         cells = parse_ihex(hex_path.read_text())
 
-        addrs = sorted(cells)
+        addrs = sorted(a for a in cells if a >= m.SETTINGS_ADDR)
+        backup_addrs = sorted(a for a in cells if a < m.SETTINGS_ADDR)
         check("page starts at the settings address", addrs[0], m.SETTINGS_ADDR)
-        check("page covers the whole struct", len(cells), m.SETTINGS_SIZE)
+        check("page covers the whole struct", len(addrs), m.SETTINGS_SIZE)
         check("page is contiguous", addrs[-1], m.SETTINGS_ADDR + m.SETTINGS_SIZE - 1)
 
         page = bytes(cells[a] for a in addrs)
+
+        # The bootloader copies the bank and boot validation fields from a
+        # valid backup, so a missing or different backup undoes the page
+        check("backup page is at the MBR params page",
+              backup_addrs[0] if backup_addrs else None, m.BACKUP_ADDR)
+        check("backup page is identical to the page",
+              bytes(cells[a] for a in backup_addrs), page)
 
         # The two checks the bootloader performs
         check("settings crc matches its own payload",

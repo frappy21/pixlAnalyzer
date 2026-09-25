@@ -14,7 +14,14 @@ nrfutil cannot be installed on this machine.
     python3 tools/mkblsettings.py build/PixlAnalyzerOLED.bin build/settings.hex
 
 Pass --base <dump.bin> with a page read back from the device to keep the
-fields the bootloader already wrote (settings version, SoftDevice size).
+fields the bootloader already wrote (bootloader version, SoftDevice size).
+
+The page is written twice: at 0x7F000 and at the backup address 0x7E000 (the
+MBR parameters page). When the backup has a valid CRC the bootloader copies the
+bank and boot validation fields from it over the main page
+(nrf_dfu_settings.c: nrf_dfu_settings_reinit), so a stale backup - e.g. the one
+the stock pixl.js image ships - silently replaces our record and the device
+boots into DFU mode. nrfutil writes the backup for the same reason.
 """
 
 import argparse
@@ -22,6 +29,7 @@ import struct
 import zlib
 
 SETTINGS_ADDR = 0x0007F000
+BACKUP_ADDR = 0x0007E000  # NRF_MBR_PARAMS_PAGE_ADDRESS, the settings backup
 SETTINGS_SIZE = 904  # sizeof(nrf_dfu_settings_t)
 
 # Offsets inside nrf_dfu_settings_t, from components/libraries/bootloader/dfu/nrf_dfu_types.h
@@ -76,9 +84,9 @@ def build(app_bytes, app_version, base=None):
     if base:
         # Keep what the device's own bootloader wrote, so we cannot disagree
         # with it about the layout it expects
-        version = get32(base, OFF_VERSION)
-        if version not in (1, 2):
-            version = SETTINGS_VERSION_DEFAULT
+        # The settings version is not kept: a version 1 page makes the
+        # bootloader skip the app CRC check and migrate the page itself,
+        # and every bootloader that reads the backup page understands 2
         bl_version = get32(base, OFF_BL_VERSION)
         if bl_version == 0xFFFFFFFF:
             bl_version = 1
@@ -193,7 +201,8 @@ def main():
     page, app_crc = build(app, args.app_version, base)
     verify(page)
 
-    text = ihex(page, SETTINGS_ADDR)
+    text = (ihex(page, BACKUP_ADDR).replace(":00000001FF\n", "")
+            + ihex(page, SETTINGS_ADDR))
 
     if args.merge:
         # Do not staple the two files together: objcopy addresses its records
