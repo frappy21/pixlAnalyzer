@@ -24,8 +24,30 @@ bootloader at 0x77000 does signed OTA DFU.
 | Power | LiPo, ADC on AIN0 (P0.02), charger status P0.03 |
 | Extras | 2 MB SPI NOR on P0.18 (identified only, never written), LED P0.31, NFC antenna (unused) |
 
-**There are no SWD pads broken out to a connector on this unit** — the pins were
-found on the board itself. Handle the probe wiring carefully.
+**SWD on the OLED unit goes through the USB-C connector.** The data pins are
+not USB: they carry SWD (xiaohai OLED board, connector J4). The board also has
+1.27 mm pads J2 (1 = +3V3, 2 = SWDIO, 3 = SWDCLK, 4 = GND).
+
+| USB-C pin | USB name | Board net | J-Link 20-pin |
+|---|---|---|---|
+| A6 / B6 | D+ | SWDIO | 7 |
+| A7 / B7 | D- | SWDCLK | 9 |
+| A1/A12/B1/B12, shell | GND | GND | 4 |
+| A4/A9/B4/B9 | VBUS | +5V to the charger | **not connected** |
+
+VTref (J-Link pin 1) needs **3.3 V**, from J2 pin 1 or any 3.3 V source that
+shares GND. Never feed it from VBUS: the probe drives SWD at the VTref level
+and 5 V overdrives the nRF52832 pins (3.6 V max). Plug orientation does not
+matter, A6/B6 and A7/B7 are joined on the board.
+
+**Units can ship read protected (APPROTECT).** OpenOCD then reports
+`Could not find MEM-AP to control the core`, and `nrf52.dap apreg 1 0x0c`
+(APPROTECTSTATUS) reads 0. The only unlock is `nrf52_recover`, which erases the
+whole chip - SoftDevice, bootloader and UICR included - so there is no backup of
+the stock firmware first. Restore the base from the pixl.js release
+(`pixljs_all.hex` of solosky/pixl.js, OLED zip): keep its MBR (0x0), SoftDevice
+(0x1000), bootloader (0x77000), MBR parameters page (0x7E000) and UICR, and add
+this application plus its settings page.
 
 ## Build
 
@@ -61,6 +83,27 @@ application plus that page.
 Wiring: **SWDIO, SWCLK, GND**. Leave the device on its own battery and do not
 connect the probe's 3.3 V output to it.
 
+Without SEGGER's JLinkExe, the same flow runs through OpenOCD (J-Link by
+default, `OPENOCD_IF=interface/cmsis-dap.cfg` for a DAPLink):
+
+```bash
+make flash-openocd                  # PixlAnalyzerOLED
+make flash-openocd VARIANT=PixlAnalyzerLCD
+```
+
+### Tools that work on the running device
+
+All three read over SWD without halting the firmware:
+
+| Tool | What |
+|---|---|
+| `tools/screenshot.py out.png` | the frame buffer as a PNG |
+| `tools/rssidump.py -n 10` | peak / weakest / floor / busy statistics of the sweep |
+| `tools/liveview.py` | browser page at http://localhost:8024: live spectrum, colour waterfall, screen mirror |
+
+They read symbol addresses from `build/<target>.out`, so it must match the
+image on the device.
+
 ### Two things that will bite you
 
 **1. Never mass erase.** A chip erase wipes the SoftDevice, the bootloader at
@@ -81,7 +124,12 @@ image — matches. An OTA update writes that page itself; a `loadfile` does not.
 Flash only the application and the device sits in DFU mode instead of booting.
 
 `tools/mkblsettings.py` builds that page (this is what `nrfutil settings
-generate` would do). `make settings` writes it on its own, and
+generate` would do). It writes the page twice, at 0x7F000 and at the backup
+address 0x7E000: when the backup page holds a valid CRC, the bootloader copies
+the bank and boot validation fields from it over the main page
+(`nrf_dfu_settings.c: nrf_dfu_settings_reinit`). A stale backup - the stock
+pixl.js image ships one - silently replaced a page written only at 0x7F000
+and the device booted into DFU mode. `make settings` writes it on its own, and
 `build/<target>-jlink.hex` is a single normalised file containing both the
 application and the page, if you would rather flash one file with another tool.
 
@@ -113,6 +161,27 @@ by `make packages` into `firmware/build/`.)
 
 Built and tested on the host; **the current build has not yet run on hardware**.
 The previous build did, and produced two bug reports that drove the fixes below.
+
+### Found and fixed on hardware (OLED unit, SWD over USB-C)
+
+- **Millisecond clock frozen at 0.** After the bootloader hands over,
+  LFCLKSTAT reads "running" while the RTCs get no clock, and `lfclk_start()`
+  returned early on that. Everything timed stood still: peak hold never
+  decayed (bars only grew), the HZ readout stayed 0, dim and sleep never
+  fired. The LF clock is now always restarted, on the 32 kHz crystal.
+- **SWD flashing booted into DFU** because of the stale settings backup page,
+  see above.
+- **Waterfall full of noise dots.** Measured: over a 32 sample visit pure
+  noise peaks up to 6 dB (p90) above the tracked floor, so the 4 dB busy
+  margin sat inside the noise. Now 7 dB.
+- **RSSI in RXIDLE is valid.** Checked A/B against sampling after
+  TASKS_START: same statistics within 1 dB, so the sweep stays as it is.
+- **Long MID press was unreachable** (the menu opened on the press edge), a
+  held click could skip the TX confirm screen, Sleep with a held button woke
+  straight back up, and clicks were lost on the BLE and ESB screens.
+- Sweep rate 66 -> 119 per second: redraws capped at about 30 fps, the
+  instruction cache enabled, and the scanner screen drawn a byte at a time
+  (`test/test_spectrum_render.c` proves the output identical).
 
 ### Fixed after hardware feedback
 
