@@ -38,6 +38,7 @@ SRC_FILES += \
   src/app/scr_menu.c \
   src/app/scr_scanner.c \
   src/app/scr_settings.c \
+  src/app/scr_system.c \
   src/app/scr_tx.c \
   src/app/screens.c \
   src/app/settings.c \
@@ -46,6 +47,7 @@ SRC_FILES += \
   src/app/ui_ble.c \
   src/app/ui_esb.c \
   src/app/ui_info.c \
+  src/app/ui_sys.c \
   src/app/ui_tx.c \
   src/app/version.c \
   src/drivers/battery.c \
