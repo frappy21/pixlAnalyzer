@@ -60,6 +60,7 @@ SRC_FILES += \
   src/gfx/font5x7.c \
   src/gfx/gfx.c \
   src/radio/ble_scan.c \
+  src/radio/dwell.c \
   src/radio/esb_scan.c \
   src/radio/scanner.c \
   src/radio/sweep_order.c \

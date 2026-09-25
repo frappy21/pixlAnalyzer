@@ -2,6 +2,7 @@
 
 #include "nrf.h"
 
+#include "dwell.h"
 #include "power.h"
 #include "scanner.h"
 #include "sweep_order.h"
@@ -22,6 +23,12 @@ static uint8_t m_count;
 static uint8_t m_dwell = SCAN_DWELL_SAMPLES_DEFAULT;
 static bool m_shuffle = true;
 static uint16_t m_lcg = 0xACE1; // visit order randomiser, seeded deterministically
+
+// Adaptive dwell (dwell.h): a channel counts as active for this many sweeps
+// after a visit that saw a sample above the busy threshold
+#define ACTIVITY_HOLD_SWEEPS 32
+static bool m_adaptive = true;
+static uint8_t m_activity[SCAN_MAX_CHANNELS]; // sweeps left in the active state
 
 // Park mode feeds the watchdog this often, far inside its 8s timeout
 #define PARK_WDT_FEED_US 100000u
@@ -70,6 +77,8 @@ void scanner_init(void)
         g_scan[i].weak = RSSI_INVALID;
         g_scan[i].busy = 0;
     }
+
+    memset(m_activity, 0, sizeof(m_activity));
 
     if (m_count == 0)
         scanner_set_span(2400, 2483);
@@ -124,6 +133,8 @@ void scanner_set_span(uint16_t start_mhz, uint16_t end_mhz)
     if (end_mhz < start_mhz)
         end_mhz = start_mhz;
 
+    memset(m_activity, 0, sizeof(m_activity));
+
     uint16_t step = 1;
     uint16_t span = end_mhz - start_mhz + 1;
     if (span > SCAN_MAX_CHANNELS)
@@ -143,6 +154,7 @@ void scanner_set_span(uint16_t start_mhz, uint16_t end_mhz)
 
 void scanner_set_channels(const uint16_t *mhz, uint8_t count)
 {
+    memset(m_activity, 0, sizeof(m_activity));
     m_count = 0;
     for (uint8_t i = 0; i < count && m_count < SCAN_MAX_CHANNELS; i++)
     {
@@ -166,6 +178,14 @@ void scanner_set_dwell(uint8_t samples)
 
 void scanner_set_shuffle(bool on) { m_shuffle = on; }
 
+void scanner_set_adaptive(bool on)
+{
+    m_adaptive = on;
+    memset(m_activity, 0, sizeof(m_activity));
+}
+
+bool scanner_adaptive(void) { return m_adaptive; }
+
 uint8_t scanner_count(void) { return m_count; }
 
 uint16_t scanner_mhz(uint8_t index)
@@ -181,8 +201,8 @@ static void radio_tune(const chan_tune_t *t)
     NRF_RADIO->FREQUENCY = ((uint32_t)t->map << RADIO_FREQUENCY_MAP_Pos) | t->freq;
 }
 
-// Visits one channel and fills its result slot
-static void visit(uint8_t idx)
+// Visits one channel for the given number of samples and fills its result slot
+static void visit(uint8_t idx, uint8_t dwell)
 {
     radio_tune(&m_tune[idx]);
 
@@ -200,7 +220,7 @@ static void visit(uint8_t idx)
     uint8_t busy_thr = (g_floor[idx] > SIGNAL_MARGIN_DB) ? g_floor[idx] - SIGNAL_MARGIN_DB : 0;
     uint16_t busy = 0;
 
-    for (uint8_t i = 0; i < m_dwell; i++)
+    for (uint8_t i = 0; i < dwell; i++)
     {
         NRF_RADIO->EVENTS_RSSIEND = 0;
         NRF_RADIO->TASKS_RSSISTART = 1;
@@ -222,7 +242,12 @@ static void visit(uint8_t idx)
 
     g_scan[idx].peak = strongest;
     g_scan[idx].weak = weakest;
-    g_scan[idx].busy = (uint8_t)((busy * 255u) / m_dwell);
+    g_scan[idx].busy = (uint8_t)((busy * 255u) / dwell);
+
+    if (busy)
+        m_activity[idx] = ACTIVITY_HOLD_SWEEPS;
+    else if (m_activity[idx])
+        m_activity[idx]--;
 
     // Track the noise floor from the weakest sample of the visit. Attack fast
     // when the band gets quieter, rise slowly so a burst cannot drag it up.
@@ -246,10 +271,24 @@ void scanner_sweep(void)
 
     radio_hfxo_start();
 
+    // Samples per visit: the fixed dwell, or the adaptive split of the same
+    // budget between active and quiet channels
+    dwell_plan_t plan = {.quiet = m_dwell, .active = m_dwell};
+    if (m_adaptive)
+    {
+        uint8_t active = 0;
+        for (uint8_t i = 0; i < m_count; i++)
+        {
+            if (m_activity[i])
+                active++;
+        }
+        plan = dwell_plan(m_dwell, m_count, active);
+    }
+
     if (!m_shuffle)
     {
         for (uint8_t i = 0; i < m_count; i++)
-            visit(i);
+            visit(i, m_activity[i] ? plan.active : plan.quiet);
     }
     else
     {
@@ -262,7 +301,7 @@ void scanner_sweep(void)
         uint8_t idx = (uint8_t)(m_lcg % m_count);
         for (uint8_t n = 0; n < m_count; n++)
         {
-            visit(idx);
+            visit(idx, m_activity[idx] ? plan.active : plan.quiet);
             idx = (uint8_t)((idx + stride) % m_count);
             if (n % 32 == 31)
                 power_watchdog_feed();

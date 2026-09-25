@@ -65,6 +65,12 @@ void scanner_set_channels(const uint16_t *mhz, uint8_t count);
 void scanner_set_dwell(uint8_t samples);
 void scanner_set_shuffle(bool on);
 
+// Adaptive dwell (dwell.h), on by default: channels that showed activity in
+// the last sweeps get more samples, quiet ones fewer, the samples per sweep
+// stay those of the fixed dwell. Off: every visit takes the fixed dwell.
+void scanner_set_adaptive(bool on);
+bool scanner_adaptive(void);
+
 uint8_t scanner_count(void);
 uint16_t scanner_mhz(uint8_t index);
 uint16_t scanner_span_start(void);
