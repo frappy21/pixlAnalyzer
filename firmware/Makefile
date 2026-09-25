@@ -32,6 +32,7 @@ SRC_FILES += \
   src/app/channels.c \
   src/app/classify.c \
   src/app/scr_ble.c \
+  src/app/scr_ble_sensors.c \
   src/app/scr_esb.c \
   src/app/scr_identify.c \
   src/app/scr_info.c \
@@ -61,7 +62,10 @@ SRC_FILES += \
   src/gfx/font3x5.c \
   src/gfx/font5x7.c \
   src/gfx/gfx.c \
+  src/radio/ble_adv.c \
+  src/radio/ble_devtab.c \
   src/radio/ble_scan.c \
+  src/radio/ble_sensor.c \
   src/radio/dwell.c \
   src/radio/esb_scan.c \
   src/radio/scanner.c \
@@ -191,6 +195,10 @@ test:
 		test/test_spectrum_features.c src/radio/dwell.c src/gfx/gfx.c src/gfx/font3x5.c \
 		src/gfx/font5x7.c src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_features
 	@$(OUTPUT_DIRECTORY)/test_spectrum_features
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+		test/test_ble.c src/radio/ble_adv.c src/radio/ble_sensor.c src/radio/ble_devtab.c \
+		-o $(OUTPUT_DIRECTORY)/test_ble
+	@$(OUTPUT_DIRECTORY)/test_ble
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc
