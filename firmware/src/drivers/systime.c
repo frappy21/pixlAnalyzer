@@ -10,8 +10,16 @@ static uint64_t m_ticks;
 
 static void lfclk_start(void)
 {
-    if (NRF_CLOCK->LFCLKSTAT & CLOCK_LFCLKSTAT_STATE_Msk)
-        return;
+    // Always restart, never trust LFCLKSTAT: after the bootloader hands over it
+    // reads "running" (RC) while the RTCs get no clock at all, which froze the
+    // millisecond clock at 0 on hardware. Stopping is also the only way to
+    // change the source to the crystal.
+    NRF_CLOCK->TASKS_LFCLKSTOP = 1;
+    for (uint32_t guard = 0; guard < 100000; guard++)
+    {
+        if (!(NRF_CLOCK->LFCLKSTAT & CLOCK_LFCLKSTAT_STATE_Msk))
+            break;
+    }
 
     NRF_CLOCK->LFCLKSRC = CLOCK_LFCLKSRC_SRC_Xtal << CLOCK_LFCLKSRC_SRC_Pos;
     NRF_CLOCK->EVENTS_LFCLKSTARTED = 0;
@@ -25,7 +33,14 @@ static void lfclk_start(void)
             return;
     }
 
+    NRF_CLOCK->TASKS_LFCLKSTOP = 1;
+    for (uint32_t guard = 0; guard < 100000; guard++)
+    {
+        if (!(NRF_CLOCK->LFCLKSTAT & CLOCK_LFCLKSTAT_STATE_Msk))
+            break;
+    }
     NRF_CLOCK->LFCLKSRC = CLOCK_LFCLKSRC_SRC_RC << CLOCK_LFCLKSRC_SRC_Pos;
+    NRF_CLOCK->EVENTS_LFCLKSTARTED = 0;
     NRF_CLOCK->TASKS_LFCLKSTART = 1;
     for (uint32_t guard = 0; guard < 8000000; guard++)
     {
