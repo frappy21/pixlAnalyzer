@@ -441,3 +441,101 @@ void ui_ble_hunt(const ble_dev_t *dev, int8_t rssi, uint32_t age_ms, const int8_
 
     display_flush();
 }
+
+// ---------------------------------------------------------------------------
+// Sensor dashboard
+// ---------------------------------------------------------------------------
+
+#define SENSOR_ROWS 5
+
+void ui_ble_sensors(const ble_sensor_entry_t *list, uint8_t n, uint8_t selected, uint32_t now_ms)
+{
+    char buf[12];
+    ble_line_t l;
+
+    display_clear();
+    gfx_text(2, 1, "SENSORS");
+    gfx_fmt_int(buf, n);
+    gfx_text_micro(48, 2, buf);
+    ui_battery();
+    gfx_hline(0, DISP_W - 1, 9);
+
+    if (n == 0)
+    {
+        gfx_text(14, 28, "LISTENING...");
+        display_flush();
+        return;
+    }
+
+    uint8_t first = 0;
+    if (selected >= SENSOR_ROWS)
+        first = selected - (SENSOR_ROWS - 1);
+
+    for (uint8_t row = 0; row < SENSOR_ROWS && first + row < n; row++)
+    {
+        const ble_sensor_entry_t *e = &list[first + row];
+        int y = 11 + row * 9;
+
+        // Format, then the name or the address tail
+        gfx_text_micro(2, y + 1, ble_sensor_name(e->s.fmt));
+        if (e->name[0])
+        {
+            ble_ln_init(&l, "");
+            for (uint8_t i = 0; e->name[i] && i < 6; i++)
+                ble_ln_char(&l, e->name[i]);
+            gfx_text_micro(34, y + 1, l.s);
+        }
+        else
+        {
+            addr_tail(buf, e->addr, e->addr_type);
+            gfx_text_micro(34, y + 1, buf);
+        }
+
+        if (e->s.valid & BLE_SENSOR_ENCRYPTED)
+        {
+            gfx_text_micro(62, y + 1, "ENCRYPTED");
+        }
+        else
+        {
+            if (e->s.valid & BLE_SENSOR_TEMP)
+            {
+                ble_ln_init(&l, "");
+                ble_ln_fixed(&l, e->s.temp / 10, 1);
+                ble_ln_char(&l, 'C');
+                gfx_text_micro(84 - gfx_text_micro_width(l.s), y + 1, l.s);
+            }
+            if (e->s.valid & BLE_SENSOR_HUM)
+            {
+                ble_ln_init(&l, "");
+                ble_ln_int(&l, (e->s.hum + 50) / 100);
+                ble_ln_char(&l, 'H');
+                gfx_text_micro(106 - gfx_text_micro_width(l.s), y + 1, l.s);
+            }
+            if (e->s.valid & BLE_SENSOR_BATT)
+            {
+                gfx_fmt_int(buf, e->s.batt);
+                gfx_text_micro(DISP_W - 1 - gfx_text_micro_width(buf), y + 1, buf);
+            }
+        }
+
+        if (first + row == selected)
+            gfx_invert(0, y, DISP_W, 8);
+    }
+
+    // Footer: the selected sensor's radio side
+    const ble_sensor_entry_t *e = &list[selected < n ? selected : 0];
+    ble_ln_init(&l, "RSSI ");
+    ble_ln_int(&l, e->rssi);
+    ble_ln_str(&l, " AGO ");
+    ln_age(&l, now_ms - e->last_ms);
+    if (e->s.valid & BLE_SENSOR_MV)
+    {
+        ble_ln_char(&l, ' ');
+        ble_ln_int(&l, e->s.mv);
+        ble_ln_str(&l, "MV");
+    }
+    gfx_hline(0, DISP_W - 1, 56);
+    gfx_text_micro(2, 58, l.s);
+
+    display_flush();
+}

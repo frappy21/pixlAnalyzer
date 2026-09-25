@@ -32,6 +32,7 @@ SRC_FILES += \
   src/app/channels.c \
   src/app/classify.c \
   src/app/scr_ble.c \
+  src/app/scr_ble_sensors.c \
   src/app/scr_esb.c \
   src/app/scr_identify.c \
   src/app/scr_info.c \

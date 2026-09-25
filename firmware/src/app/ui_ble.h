@@ -1,10 +1,11 @@
-/** BLE scan rendering: device list, device detail, hunt view. */
+/** BLE scan rendering: device list, device detail, hunt view, sensor dashboard. */
 #ifndef PIXLA_UI_BLE_H
 #define PIXLA_UI_BLE_H
 
 #include <stdint.h>
 
 #include "ble_scan.h"
+#include "ble_sensor.h"
 
 typedef struct
 {
@@ -31,5 +32,19 @@ void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first);
 // trend holds RSSI samples (0 = not heard), oldest first.
 void ui_ble_hunt(const ble_dev_t *dev, int8_t rssi, uint32_t age_ms, const int8_t *trend,
                  uint8_t trend_len);
+
+// Sensor dashboard
+typedef struct
+{
+    uint8_t addr[6];
+    uint8_t addr_type;
+    int8_t rssi;
+    uint16_t packets;
+    uint32_t last_ms;
+    ble_sensor_t s;
+    char name[10];
+} ble_sensor_entry_t;
+
+void ui_ble_sensors(const ble_sensor_entry_t *list, uint8_t n, uint8_t selected, uint32_t now_ms);
 
 #endif // PIXLA_UI_BLE_H

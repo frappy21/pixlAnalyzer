@@ -17,6 +17,7 @@
     X(scr_ble)             \
     X(scr_ble_detail)      \
     X(scr_ble_hunt)        \
+    X(scr_ble_sensors)     \
     X(act_ble_filter)      \
     X(act_ble_sort)        \
     X(act_ble_follow)      \
