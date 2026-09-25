@@ -21,6 +21,10 @@ uint8_t g_frame_buffer[DISP_BUF_SIZE];
 static uint8_t m_shadow[DISP_BUF_SIZE];
 static bool m_shadow_valid;
 
+// Burn-in protection offset, 0 or 1 pixel right and down. OLED only.
+static uint8_t m_shift_x;
+static uint8_t m_shift_y;
+
 static void lcd_cmd(uint8_t cmd)
 {
     uint8_t b = cmd;
@@ -93,6 +97,29 @@ void display_set_contrast(uint8_t value)
 void display_set_inverted(bool inverted)
 {
     lcd_cmd(inverted ? 0xA7 : 0xA6);
+}
+
+void display_set_panel_off(bool off)
+{
+    // Both controllers: 0xAE display off (RAM kept), 0xAF display on
+    lcd_cmd(off ? 0xAE : 0xAF);
+}
+
+void display_set_shift(uint8_t dx, uint8_t dy)
+{
+#ifdef OLED_TYPE_SH1106
+    dx = dx ? 1 : 0;
+    dy = dy ? 1 : 0;
+    if (dx != m_shift_x || dy != m_shift_y)
+    {
+        m_shift_x = dx;
+        m_shift_y = dy;
+        m_shadow_valid = false; // every page moves
+    }
+#else
+    (void)dx;
+    (void)dy;
+#endif
 }
 
 void display_init(void)
@@ -186,12 +213,35 @@ void display_clear(void)
     memset(g_frame_buffer, 0, DISP_BUF_SIZE);
 }
 
-static void flush_page(uint8_t page)
+static void flush_page(uint8_t page, const uint8_t *data)
 {
     lcd_cmd(0xB0 + page);
     lcd_cmd(0x00 | (LCD_START_COL & 0x0F));
     lcd_cmd(0x10 | ((LCD_START_COL >> 4) & 0x0F));
-    lcd_data(&g_frame_buffer[page * DISP_W], DISP_W);
+    lcd_data(data, DISP_W);
+}
+
+// One page of the frame moved m_shift_x right and m_shift_y down. The last
+// column and row fall off the panel, the first ones come up blank.
+static const uint8_t *shifted_page(uint8_t page, uint8_t *out)
+{
+    const uint8_t *src = &g_frame_buffer[page * DISP_W];
+    const uint8_t *above = page ? src - DISP_W : 0;
+
+    for (int x = 0; x < DISP_W; x++)
+    {
+        int sx = x - m_shift_x;
+        if (sx < 0)
+        {
+            out[x] = 0;
+            continue;
+        }
+        uint8_t v = src[sx];
+        if (m_shift_y)
+            v = (uint8_t)((v << 1) | (above ? above[sx] >> 7 : 0));
+        out[x] = v;
+    }
+    return out;
 }
 
 static void (*m_overlay)(void);
@@ -206,15 +256,19 @@ void display_flush(void)
     if (m_overlay)
         m_overlay();
 
+    uint8_t moved[DISP_W];
+    bool shifted = m_shift_x || m_shift_y;
+
+    // The shadow holds what the panel shows, shifted or not
     for (uint8_t page = 0; page < DISP_PAGES; page++)
     {
-        const uint8_t *src = &g_frame_buffer[page * DISP_W];
+        const uint8_t *src = shifted ? shifted_page(page, moved) : &g_frame_buffer[page * DISP_W];
         uint8_t *dst = &m_shadow[page * DISP_W];
 
         if (m_shadow_valid && memcmp(src, dst, DISP_W) == 0)
             continue;
 
-        flush_page(page);
+        flush_page(page, src);
         memcpy(dst, src, DISP_W);
     }
     m_shadow_valid = true;
