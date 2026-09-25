@@ -38,4 +38,13 @@ void display_set_backlight(uint8_t level);
 
 void display_set_inverted(bool inverted);
 
+// Panel off (true) or on. The controller keeps its RAM, so switching back on
+// shows the last frame at once. Used by the OLED screensaver.
+void display_set_panel_off(bool off);
+
+// OLED burn-in protection: every flush sends the frame moved dx pixels right
+// and dy down (0 or 1 each), losing the last column and row. Does nothing on
+// the LCD build.
+void display_set_shift(uint8_t dx, uint8_t dy);
+
 #endif // PIXLA_DISPLAY_H

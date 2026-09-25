@@ -16,6 +16,20 @@ SECTIONS
     /* Placing the stack at the top of RAM */
     __stack_top__ = ORIGIN(RAM) + LENGTH(RAM);
     __stack_limit__ = __stack_top__ - 2048; /* 2KB Stack */
+
+    /* RAM that survives a reset: neither copied nor zeroed by the startup
+     * code (the crash record, see power.c). It sits at the bottom of RAM,
+     * which after a reset only the MBR (its first bytes, hence the offset)
+     * and a SoftDevice would use; the bootloader keeps its variables above
+     * the SoftDevice RAM and its stack at the top, and the SoftDevice only
+     * runs in DFU mode. Placed first, so .data follows it. */
+    .noinit ORIGIN(RAM) + 0x40 (NOLOAD) :
+    {
+        __noinit_start__ = .;
+        KEEP(*(.noinit*))
+        . = ALIGN(4);
+        __noinit_end__ = .;
+    } > RAM
 }
 
 INCLUDE "nrf_common.ld"

@@ -35,7 +35,10 @@
     X(scr_zigbee_pan)      \
     X(scr_tx)              \
     X(scr_settings)        \
+    X(scr_presets)         \
+    X(scr_sentry)          \
     X(scr_info)            \
+    X(scr_help)            \
     X(act_sleep)           \
     X(act_dfu)
 

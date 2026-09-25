@@ -24,11 +24,20 @@
 #include "led.h"
 #include "power.h"
 #include "scanner.h"
+#include "scr_system.h"
 #include "screens.h"
 #include "settings.h"
 #include "systime.h"
 #include "tx_test.h"
 #include "ui.h"
+#include "ui_sys.h"
+
+// OLED burn-in protection: the frame moves one pixel, around a 2x2 square,
+// this often
+#define BURNIN_SHIFT_MS 60000
+
+// A crash report at boot waits this long for a button before going on
+#define CRASH_REPORT_MS 30000
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,6 +47,7 @@ static void apply_settings(void)
 {
     display_set_contrast(g_settings.contrast);
     display_set_backlight(g_settings.backlight);
+    display_set_inverted(g_settings.invert != 0);
     scanner_set_dwell(g_settings.dwell);
     scanner_set_shuffle(g_settings.shuffle != 0);
     battery_set_calibration(g_settings.bat_cal);
@@ -63,15 +73,71 @@ void go_to_dfu(uint32_t hold_ms)
 }
 
 // ---------------------------------------------------------------------------
+// OLED burn-in protection
+// ---------------------------------------------------------------------------
+
+#ifdef OLED_TYPE_SH1106
+
+static bool m_saver_on;
+
+// Screensaver: the panel goes off and the first press only wakes it
+static void saver_set(bool on)
+{
+    if (on == m_saver_on)
+        return;
+    m_saver_on = on;
+    display_set_panel_off(on);
+}
+
+static void burnin_update(uint32_t now)
+{
+    static uint32_t last_ms;
+    static uint8_t step; // 0..3 around the square, 0 is the unshifted frame
+
+    if (!g_settings.burnin)
+    {
+        // Switched off: put the frame back where it belongs
+        if (step)
+        {
+            step = 0;
+            display_set_shift(0, 0);
+            app_redraw();
+        }
+        return;
+    }
+
+    if (now - last_ms >= BURNIN_SHIFT_MS)
+    {
+        last_ms = now;
+        step = (uint8_t)((step + 1) & 3);
+        display_set_shift(step == 1 || step == 2, step >= 2);
+        app_redraw(); // static screens only flush on a redraw
+    }
+}
+
+#endif
+
+// ---------------------------------------------------------------------------
 // Housekeeping
 // ---------------------------------------------------------------------------
 
 static void housekeeping(uint32_t now)
 {
     static uint32_t last_battery_ms;
+    static uint32_t last_runtime_ms;
     static bool warned_low;
 
     power_watchdog_feed();
+
+    if (now - last_runtime_ms >= 1000)
+    {
+        power_runtime_update(now / 1000u);
+        last_runtime_ms = now;
+    }
+
+#ifdef OLED_TYPE_SH1106
+    burnin_update(now);
+#endif
 
     if (now - last_battery_ms > 5000)
     {
@@ -95,8 +161,10 @@ static void housekeeping(uint32_t now)
         }
     }
 
-    if (tx_test_active())
-        return; // no dimming or sleeping while transmitting
+    // No dimming or sleeping while transmitting; sentry mode runs the
+    // display itself and is meant to be left alone for hours
+    if (tx_test_active() || scr_sentry_active())
+        return;
 
     uint32_t idle = now - app_last_input_ms();
     if (idle > 86400000u)
@@ -104,6 +172,11 @@ static void housekeeping(uint32_t now)
 
     if (!app_dimmed() && g_settings.dim_s && idle > (uint32_t)g_settings.dim_s * 1000u)
         app_dim();
+
+#ifdef OLED_TYPE_SH1106
+    if (g_settings.saver_min && idle > (uint32_t)g_settings.saver_min * 60000u)
+        saver_set(true);
+#endif
 
     if (g_settings.sleep_min && idle > (uint32_t)g_settings.sleep_min * 60000u)
         go_to_sleep("NO INPUT");
@@ -157,7 +230,18 @@ int main(void)
 
     check_dfu_gesture();
     ui_power_on_gate();
+
+    // The version goes onto the boot screen as an overlay
+    display_set_overlay(ui_sys_boot_overlay);
     ui_boot_screen();
+    display_set_overlay(0);
+
+    // A crash before this boot is shown once, then kept under Info
+    if (power_crash_fresh())
+    {
+        ui_sys_crash_report(CRASH_REPORT_MS);
+        power_crash_mark_shown();
+    }
 
     battery_init();
     battery_update();
@@ -178,6 +262,17 @@ int main(void)
     {
         buttons_poll();
         uint32_t now = systime_ms();
+
+#ifdef OLED_TYPE_SH1106
+        // Any press ends the screensaver and is used up doing so
+        if (m_saver_on && buttons_any_down())
+        {
+            saver_set(false);
+            buttons_flush();
+            app_note_input();
+            app_redraw();
+        }
+#endif
 
         // Global long presses. On a main screen: long LEFT/RIGHT switch to
         // the previous/next main screen, long MID opens the menu. Anywhere
