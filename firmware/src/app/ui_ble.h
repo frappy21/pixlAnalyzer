@@ -25,7 +25,10 @@ void ui_ble_list(const ble_list_view_t *view);
 // text lines. Build once per redraw, then draw from the given first line.
 uint8_t ui_ble_detail_lines(const ble_dev_t *dev, uint32_t now_ms, char (*lines)[BLE_LINE_LEN],
                             uint8_t max);
-void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first);
+// trend: int8_t RSSI samples (negative dBm, 0 = not heard), oldest first.
+// trend_len: 0 = no sparkline drawn.
+void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first,
+                   const int8_t *trend, uint8_t trend_len);
 #define UI_BLE_DETAIL_ROWS 7
 
 // Hunt view: level, bar and trend of one device. rssi 0 = not heard lately.

@@ -198,11 +198,24 @@ const app_screen_t scr_ble = {
 // Device detail, opened from the list
 // ---------------------------------------------------------------------------
 
+// RSSI trend: 124 int8_t samples, stored in the arena after the hunt trend
+#define BLE_DETAIL_TREND (DISP_W - 4)
+#define BLE_ARENA_DETAIL_TREND \
+    ((int8_t *)&g_app_arena[8192 + BLE_DETAIL_LINES * BLE_LINE_LEN + BLE_HUNT_TREND])
+_Static_assert(BLE_DETAIL_LINES * BLE_LINE_LEN + BLE_HUNT_TREND + BLE_DETAIL_TREND <= 8192,
+               "BLE detail trend overflows arena upper half");
+
 static uint8_t m_detail_first;
+static uint8_t m_detail_trend_len;
+static uint32_t m_detail_sample_ms;
+
+#define DETAIL_SAMPLE_MS 500
 
 static void ble_detail_enter(void)
 {
     m_detail_first = 0;
+    m_detail_trend_len = 0;
+    m_detail_sample_ms = 0;
     led_off(); // the list's alert blinking pauses while it is covered
 }
 
@@ -217,6 +230,24 @@ static void ble_detail_tick(uint32_t now)
     {
         listened_ms = 0;
         app_redraw();
+    }
+
+    // Sample RSSI into the sparkline buffer every DETAIL_SAMPLE_MS
+    if (now - m_detail_sample_ms >= DETAIL_SAMPLE_MS)
+    {
+        m_detail_sample_ms = now;
+        const ble_dev_t *dev = selected_device();
+        int8_t sample = dev ? dev->rssi_last : 0;
+        int8_t *trend = BLE_ARENA_DETAIL_TREND;
+        if (m_detail_trend_len < BLE_DETAIL_TREND)
+        {
+            trend[m_detail_trend_len++] = sample;
+        }
+        else
+        {
+            __builtin_memmove(trend, trend + 1, (uint32_t)(BLE_DETAIL_TREND - 1));
+            trend[BLE_DETAIL_TREND - 1] = sample;
+        }
     }
 
     // A page is 7 lines, a step keeps one line of context
@@ -252,7 +283,8 @@ static void ble_detail_tick(uint32_t now)
         uint8_t last_first = count > UI_BLE_DETAIL_ROWS ? count - UI_BLE_DETAIL_ROWS : 0;
         if (m_detail_first > last_first)
             m_detail_first = last_first;
-        ui_ble_detail(BLE_ARENA_LINES, count, m_detail_first);
+        ui_ble_detail(BLE_ARENA_LINES, count, m_detail_first,
+                      BLE_ARENA_DETAIL_TREND, m_detail_trend_len);
     }
 }
 

@@ -163,6 +163,7 @@ static const scanner_geom_t geom[LAYOUT_COUNT] = {
     [LAYOUT_SPLIT] = {SPECTRUM_TOP, SPECTRUM_H, RULER_Y, WATERFALL_START, WATERFALL_ROWS},
     [LAYOUT_SPECTRUM] = {STATUS_H, DISP_H - STATUS_H - RULER_H, DISP_H - RULER_H, 0, 0},
     [LAYOUT_WATERFALL] = {0, 0, STATUS_H, STATUS_H + RULER_H, DISP_H - STATUS_H - RULER_H},
+    [LAYOUT_OCC] = {0, 0, 0, 0, 0},
 };
 
 uint8_t ui_scanner_waterfall_rows(uint8_t layout)
@@ -178,6 +179,8 @@ const char *ui_layout_name(uint8_t layout)
         return "SPECT";
     case LAYOUT_WATERFALL:
         return "WFALL";
+    case LAYOUT_OCC:
+        return "OCCUP";
     default:
         return "SPLIT";
     }
@@ -314,8 +317,94 @@ static void alarm_banner(const scanner_view_t *view, int y)
     gfx_invert(x - 1, y - 1, w + 2, MICRO_HEIGHT + 2);
 }
 
+// Channel occupancy bar chart: WiFi channels 1-13 + BLE advertising channels
+#define OCC_WIFI_N   13
+#define OCC_BAR_W    8
+#define OCC_BAR_GAP  1
+#define OCC_STRIDE   (OCC_BAR_W + OCC_BAR_GAP)
+#define OCC_LEFT     5
+#define OCC_BOT      50
+#define OCC_MAX_H    38
+#define OCC_LABEL_Y  52
+
+static void draw_occ_layout(const scanner_view_t *view)
+{
+    char buf[8];
+
+    display_clear();
+    scanner_status_bar(view);
+
+    // 30% threshold line so busy channels are obvious
+    gfx_hline(OCC_LEFT, OCC_LEFT + OCC_WIFI_N * OCC_STRIDE - 1,
+              OCC_BOT - (30 * OCC_MAX_H) / 100);
+
+    for (uint8_t i = 0; i < OCC_WIFI_N; i++)
+    {
+        chan_mark_t mark;
+        if (!channels_plan_get(PLAN_WIFI, i, &mark))
+            break;
+
+        int x = OCC_LEFT + i * OCC_STRIDE;
+        uint8_t occ = channels_occupancy(PLAN_WIFI, i);
+        int h = (int)((uint32_t)occ * OCC_MAX_H / 255);
+        if (h < 1 && occ > 0)
+            h = 1;
+
+        gfx_box(x, OCC_BOT - OCC_MAX_H, OCC_BAR_W, OCC_MAX_H, false, true);
+        if (h > 0)
+            gfx_box(x, OCC_BOT - h, OCC_BAR_W, h, true, true);
+
+        // Channel number: 1 digit centered, 2 digits left-aligned
+        if (mark.number <= 9)
+        {
+            gfx_fmt_int(buf, mark.number);
+            gfx_text_micro(x + 2, OCC_LABEL_Y, buf);
+        }
+        else
+        {
+            buf[0] = (char)('0' + mark.number / 10);
+            buf[1] = (char)('0' + mark.number % 10);
+            buf[2] = '\0';
+            gfx_text_micro(x, OCC_LABEL_Y, buf);
+        }
+    }
+
+    // BLE advertising channels in the footer row
+    gfx_hline(0, DISP_W - 1, OCC_LABEL_Y + 6);
+    gfx_text_micro(2, OCC_LABEL_Y + 8, "BLE");
+
+    uint8_t ble_n = channels_plan_count(PLAN_BLE);
+    int bx = 24;
+    for (uint8_t i = 0; i < ble_n && i < 3; i++)
+    {
+        chan_mark_t mark;
+        if (!channels_plan_get(PLAN_BLE, i, &mark))
+            break;
+        uint8_t occ = channels_occupancy(PLAN_BLE, i);
+        uint8_t pct = (uint8_t)(((uint32_t)occ * 100) / 255);
+        gfx_fmt_int(buf, mark.number);
+        gfx_text_micro(bx, OCC_LABEL_Y + 8, buf);
+        bx += gfx_text_micro_width(buf) + 1;
+        gfx_text_micro(bx, OCC_LABEL_Y + 8, ":");
+        bx += gfx_text_micro_width(":") + 1;
+        gfx_fmt_int(buf, pct);
+        gfx_text_micro(bx, OCC_LABEL_Y + 8, buf);
+        bx += gfx_text_micro_width(buf) + 1;
+        gfx_text_micro(bx, OCC_LABEL_Y + 8, "%");
+        bx += gfx_text_micro_width("%") + 6;
+    }
+
+    display_flush();
+}
+
 void ui_scanner(const scanner_view_t *view)
 {
+    if (view->layout == LAYOUT_OCC)
+    {
+        draw_occ_layout(view);
+        return;
+    }
+
     const scanner_geom_t *g = &geom[view->layout < LAYOUT_COUNT ? view->layout : LAYOUT_SPLIT];
 
     display_clear();

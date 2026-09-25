@@ -431,6 +431,8 @@ static void freeze_action(void)
     m_view.frozen = !m_view.frozen;
     if (!m_view.frozen)
         m_view.scroll_back = 0;
+    else
+        m_view.tool = TOOL_SCROLL;
 }
 
 static const char *freeze_value(void)

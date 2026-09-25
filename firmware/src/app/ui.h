@@ -27,6 +27,7 @@ typedef enum
     LAYOUT_SPLIT = 0,  // spectrum, ruler, waterfall
     LAYOUT_SPECTRUM,   // a spectrum twice as tall, ruler at the bottom
     LAYOUT_WATERFALL,  // ruler on top, a waterfall twice as tall
+    LAYOUT_OCC,        // channel occupancy bar chart (WiFi + BLE adv)
     LAYOUT_COUNT
 } scanner_layout_t;
 

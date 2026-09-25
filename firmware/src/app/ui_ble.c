@@ -355,7 +355,10 @@ uint8_t ui_ble_detail_lines(const ble_dev_t *dev, uint32_t now_ms, char (*lines)
     return out.count;
 }
 
-void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first)
+static int hunt_scale(int8_t rssi, int span); // defined in the Hunt section below
+
+void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first,
+                   const int8_t *trend, uint8_t trend_len)
 {
     char buf[12];
 
@@ -369,8 +372,23 @@ void ui_ble_detail(char (*lines)[BLE_LINE_LEN], uint8_t count, uint8_t first)
     gfx_fmt_int(&buf[n], count);
     gfx_text_micro(DISP_W - 1 - gfx_text_micro_width(buf), 2, buf);
 
-    for (uint8_t row = 0; row < UI_BLE_DETAIL_ROWS && first + row < count; row++)
+    // With a sparkline, leave 8px at the bottom for it
+    uint8_t rows_shown = (trend_len > 0) ? UI_BLE_DETAIL_ROWS - 1 : UI_BLE_DETAIL_ROWS;
+    for (uint8_t row = 0; row < rows_shown && first + row < count; row++)
         gfx_text_micro(2, 12 + row * 7, lines[first + row]);
+
+    // RSSI sparkline at the bottom 7 rows (y=57..63)
+    if (trend_len > 0)
+    {
+        int sparky = DISP_H - 7;
+        gfx_hline(0, DISP_W - 1, sparky - 1);
+        for (uint8_t i = 0; i < trend_len && i < DISP_W - 4; i++)
+        {
+            int h = hunt_scale(trend[i], 6);
+            if (h > 0)
+                gfx_vline(2 + i, DISP_H - h, DISP_H - 1);
+        }
+    }
 
     display_flush();
 }
