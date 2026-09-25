@@ -4,15 +4,21 @@
 #include "app_config.h"
 #include "board_config.h"
 #include "display.h"
+#include "flash_ext.h"
 #include "led.h"
 #include "power.h"
 #include "scanner.h"
+#include "systime.h"
 
 // Vector table of this application, from gcc_startup_nrf52.S
 extern uint32_t __isr_vector;
 
 #define WDT_TIMEOUT_S 8
 #define WDT_RELOAD_KEY 0x6E524635
+
+// The wake button has to read released this long before SYSTEM OFF, so the
+// release bounce is over too
+#define SLEEP_RELEASE_MS 50
 
 static bool m_woke_from_sleep;
 static bool m_watchdog_running;
@@ -38,6 +44,10 @@ void power_init(void)
     NRF_POWER->POFCON = (POWER_POFCON_THRESHOLD_V27 << POWER_POFCON_THRESHOLD_Pos) |
                         (POWER_POFCON_POF_Enabled << POWER_POFCON_POF_Pos);
     NRF_POWER->EVENTS_POFWARN = 0;
+
+    // Code runs from flash with wait states; the cache makes the sweep and
+    // render loops noticeably cheaper
+    NRF_NVMC->ICACHECNF = NVMC_ICACHECNF_CACHEEN_Msk;
 
     // NOTE: the DC/DC regulator is deliberately NOT enabled. It needs an
     // external inductor that the pixl.js RevC bill of materials does not list,
@@ -99,8 +109,34 @@ void power_watchdog_feed(void)
         NRF_WDT->RR[0] = WDT_RELOAD_KEY;
 }
 
+// SYSTEM OFF with the wake pin already asserted wakes straight back up, so a
+// Sleep chosen with a still held button would never sleep. Wait here, with
+// the goodbye message still on screen, until the button is really released.
+static void wait_wake_button_released(void)
+{
+    uint32_t released_at = systime_ms();
+
+    while (1)
+    {
+        uint32_t now = systime_ms();
+        if (nrf_gpio_pin_read(PIN_BTN_MID) == 0)
+            released_at = now;
+        else if (now - released_at >= SLEEP_RELEASE_MS)
+            return;
+
+        power_watchdog_feed();
+        systime_idle(5);
+    }
+}
+
 void power_enter_deep_sleep(void)
 {
+    wait_wake_button_released();
+
+    // Deep power down for the SPI NOR while the shared bus is still up.
+    // flash_ext_init() wakes it again on the next boot.
+    flash_ext_sleep();
+
     display_clear();
     display_flush();
     display_uninit();
