@@ -25,12 +25,23 @@ enum
     SET_DIM,
     SET_SLEEP,
     SET_BATCAL,
+    SET_INVERT,
+#ifdef OLED_TYPE_SH1106
+    SET_BURNIN,
+    SET_SAVER,
+#endif
+    SET_SENTRY_DB,
+    SET_SENTRY_MS,
     SET_COUNT
 };
 
 static const char *const settings_items[SET_COUNT] = {
     "Back",     "Contrast", "Backlight", "Band",     "Dwell",   "WF speed", "WF mode",
-    "Auto floor", "Shuffle", "LED hunt", "Dim s",    "Sleep m", "Batt cal",
+    "Auto floor", "Shuffle", "LED hunt", "Dim s",    "Sleep m", "Batt cal", "Invert",
+#ifdef OLED_TYPE_SH1106
+    "Px shift", "Saver m",
+#endif
+    "Sentry dB", "Sentry ms",
 };
 
 static uint8_t m_settings_sel;
@@ -84,6 +95,21 @@ static void settings_values(const char *values[SET_COUNT], char storage[SET_COUN
 
     gfx_fmt_int(storage[SET_BATCAL], g_settings.bat_cal);
     values[SET_BATCAL] = storage[SET_BATCAL];
+
+    values[SET_INVERT] = g_settings.invert ? "ON" : "OFF";
+#ifdef OLED_TYPE_SH1106
+    values[SET_BURNIN] = g_settings.burnin ? "ON" : "OFF";
+    if (g_settings.saver_min)
+        values[SET_SAVER] = gfx_fmt_int(storage[SET_SAVER], g_settings.saver_min);
+    else
+        values[SET_SAVER] = "OFF";
+#endif
+
+    gfx_fmt_int(storage[SET_SENTRY_DB], g_settings.sentry_db);
+    values[SET_SENTRY_DB] = storage[SET_SENTRY_DB];
+
+    gfx_fmt_int(storage[SET_SENTRY_MS], g_settings.sentry_period * 100);
+    values[SET_SENTRY_MS] = storage[SET_SENTRY_MS];
 }
 
 static void settings_adjust(int dir)
@@ -159,6 +185,34 @@ static void settings_adjust(int dir)
             v = 1200;
         g_settings.bat_cal = (uint16_t)v;
         battery_set_calibration(g_settings.bat_cal);
+        break;
+    }
+    case SET_INVERT:
+        g_settings.invert = !g_settings.invert;
+        display_set_inverted(g_settings.invert != 0);
+        break;
+#ifdef OLED_TYPE_SH1106
+    case SET_BURNIN:
+        // The main loop moves the frame, or puts it back when this goes off
+        g_settings.burnin = !g_settings.burnin;
+        break;
+    case SET_SAVER:
+    {
+        int v = g_settings.saver_min + dir;
+        g_settings.saver_min = (uint8_t)(v < 0 ? 0 : (v > 60 ? 60 : v));
+        break;
+    }
+#endif
+    case SET_SENTRY_DB:
+    {
+        int v = g_settings.sentry_db + dir;
+        g_settings.sentry_db = (uint8_t)(v < 6 ? 6 : (v > 40 ? 40 : v));
+        break;
+    }
+    case SET_SENTRY_MS:
+    {
+        int v = g_settings.sentry_period + dir;
+        g_settings.sentry_period = (uint8_t)(v < 1 ? 1 : (v > 50 ? 50 : v));
         break;
     }
     default:
