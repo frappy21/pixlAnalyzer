@@ -18,16 +18,20 @@ typedef struct
 } menu_row_t;
 
 static const char *const group_rows[APP_GROUP_COUNT] = {
-    [APP_GROUP_SPECTRUM] = "Spectrum >",
-    [APP_GROUP_RECEIVE] = "Receive >",
-    [APP_GROUP_TRANSMIT] = "Transmit >",
+    [APP_GROUP_SPECTRUM] = "RF tools >",
+    [APP_GROUP_RECEIVE] = "Radios >",
+    [APP_GROUP_RC] = "RC & drones >",
+    [APP_GROUP_NFC] = "NFC >",
+    [APP_GROUP_TRANSMIT] = "TX lab >",
     [APP_GROUP_TOOLS] = "Tools >",
 };
 
 static const char *const group_titles[APP_GROUP_COUNT] = {
-    [APP_GROUP_SPECTRUM] = "SPECTRUM",
-    [APP_GROUP_RECEIVE] = "RECEIVE",
-    [APP_GROUP_TRANSMIT] = "TRANSMIT",
+    [APP_GROUP_SPECTRUM] = "RF TOOLS",
+    [APP_GROUP_RECEIVE] = "RADIOS",
+    [APP_GROUP_RC] = "RC + DRONES",
+    [APP_GROUP_NFC] = "NFC",
+    [APP_GROUP_TRANSMIT] = "TX LAB",
     [APP_GROUP_TOOLS] = "TOOLS",
     [APP_GROUP_SYSTEM] = "MENU",
 };

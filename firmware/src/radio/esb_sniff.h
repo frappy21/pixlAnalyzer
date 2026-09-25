@@ -35,6 +35,11 @@
 #define ESB_SNIFF_PHY_2M 1
 #define ESB_SNIFF_PHY_1M 2
 
+// First-address-byte candidates one run can cycle through. Two fly at
+// once (BASE0/BASE1, both preamble polarities), so the dwell per pair is
+// dwell_ms divided by the number of pairs.
+#define ESB_SNIFF_A0_MAX 8
+
 typedef struct
 {
     uint8_t addr[5];  // full address, addr[0] first on air
@@ -115,5 +120,18 @@ uint32_t esb_sniff_decoded(void);
 // Owns the radio for that time.
 void esb_sniff_run(uint16_t start_mhz, uint16_t end_mhz, uint16_t dwell_ms, uint8_t rate_mode,
                    bool payload_lsb);
+
+// The same, with the first-address-byte candidates to cycle through: the
+// known RC toy families (rc_proto.h) instead of just the nRF24 defaults.
+// The capture's first address byte comes from the candidate that matched,
+// so decoding works exactly as with the generic run.
+void esb_sniff_run_a0(uint16_t start_mhz, uint16_t end_mhz, uint16_t dwell_ms, uint8_t rate_mode,
+                      bool payload_lsb, const uint8_t *a0_list, uint8_t a0_count);
+
+// One promiscuous capture with a single pair of A0 candidates, for the RC
+// dash that locks one channel: listens dwell_ms there, returns when the
+// window is up. a0_a/a0_b are the two first address bytes to accept.
+void esb_sniff_listen(uint16_t mhz, uint16_t dwell_ms, uint8_t rate_mode, bool payload_lsb,
+                      uint8_t a0_a, uint8_t a0_b);
 
 #endif // PIXLA_ESB_SNIFF_H

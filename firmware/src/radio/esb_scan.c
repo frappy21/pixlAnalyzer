@@ -45,12 +45,14 @@ static void radio_promiscuous(uint8_t freq, uint8_t rate)
 
     // No length field, fixed payload, no whitening: we are not decoding, we are
     // counting how often the correlator locks onto a ShockBurst preamble.
+    // BALEN=1: the match is the preamble polarity byte plus the first
+    // address byte, exactly the two byte promiscuous pattern.
     NRF_RADIO->PCNF0 = (0 << RADIO_PCNF0_S0LEN_Pos) |
                        (0 << RADIO_PCNF0_LFLEN_Pos) |
                        (0 << RADIO_PCNF0_S1LEN_Pos);
     NRF_RADIO->PCNF1 = (32 << RADIO_PCNF1_MAXLEN_Pos) |
                        (32 << RADIO_PCNF1_STATLEN_Pos) |
-                       (2 << RADIO_PCNF1_BALEN_Pos) |
+                       (1 << RADIO_PCNF1_BALEN_Pos) |
                        (RADIO_PCNF1_ENDIAN_Big << RADIO_PCNF1_ENDIAN_Pos) |
                        (RADIO_PCNF1_WHITEEN_Disabled << RADIO_PCNF1_WHITEEN_Pos);
 

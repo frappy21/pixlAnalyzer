@@ -24,9 +24,13 @@ extern const uint8_t g_app_home_count;
 extern const app_screen_t scr_scanner; // Spectrum, the first main screen
 extern const app_screen_t scr_menu;    // top level menu
 extern const app_screen_t scr_group;   // submenu of one group
+extern const app_screen_t scr_intro;   // the first boot tutorial
 
 // Scanner state other screens work from (scr_scanner.c)
 uint16_t scr_scanner_marker_mhz(void);
 void scr_scanner_apply_band(void);
+
+// The intro screen runs once on a fresh device (main.c)
+void scr_intro_run(void);
 
 #endif // PIXLA_SCREENS_H

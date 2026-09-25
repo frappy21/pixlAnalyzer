@@ -23,6 +23,8 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/mdk/gcc_startup_nrf52.S \
   $(SDK_ROOT)/modules/nrfx/mdk/system_nrf52.c \
   $(SDK_ROOT)/components/boards/boards.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_nfct.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_timer.c \
 
 # Application
 SRC_FILES += \
@@ -30,6 +32,15 @@ SRC_FILES += \
   src/app/app.c \
   src/app/channels.c \
   src/app/classify.c \
+  src/app/scr_intro.c \
+  src/app/scr_jam.c \
+  src/app/scr_log.c \
+  src/app/scr_nfc.c \
+  src/app/scr_radar.c \
+  src/app/scr_rc.c \
+  src/app/scr_rc_tx.c \
+  src/app/ui_radar.c \
+  src/app/ui_rc.c \
   src/app/scr_beacon.c \
   src/app/scr_ble.c \
   src/app/scr_ble_sensors.c \
@@ -75,6 +86,12 @@ SRC_FILES += \
   src/radio/ble_devtab.c \
   src/radio/ble_scan.c \
   src/radio/ble_sensor.c \
+  src/radio/jam.c \
+  src/radio/log_store.c \
+  src/radio/nfc_ndef.c \
+  src/radio/nfc_tag.c \
+  src/radio/radar.c \
+  src/radio/rc_proto.c \
   src/radio/dwell.c \
   src/radio/esb_frame.c \
   src/radio/esb_scan.c \
@@ -82,6 +99,7 @@ SRC_FILES += \
   src/radio/esb_tx.c \
   src/radio/scanner.c \
   src/radio/sweep_order.c \
+  src/radio/unifying.c \
   src/radio/tx_test.c \
   src/radio/zb_rx.c \
 
@@ -103,6 +121,10 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/delay \
   $(SDK_ROOT)/components/boards \
   $(SDK_ROOT)/modules/nrfx/hal \
+  $(SDK_ROOT)/modules/nrfx/drivers/include \
+  $(SDK_ROOT)/components/nfc/t2t_lib \
+  $(SDK_ROOT)/components/nfc/platform \
+  src/drivers/nfc_stub \
   $(SDK_ROOT)/components/toolchain/cmsis/include \
   $(SDK_ROOT)/modules/nrfx/mdk \
 
@@ -124,7 +146,7 @@ CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
 # Firmware identity (src/app/version.c): the release number, bumped by hand,
 # and the commit the image was built from, "+" appended for a dirty tree
-FW_VERSION := 1.2
+FW_VERSION := 1.3
 FW_GIT_HASH := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
 FW_GIT_DIRTY := $(shell git status --porcelain --untracked-files=no 2>/dev/null | grep -q . && echo 1 || echo 0)
 CFLAGS += -DFW_VERSION=\"$(FW_VERSION)\" -DFW_GIT_HASH=\"$(FW_GIT_HASH)\" -DFW_GIT_DIRTY=$(FW_GIT_DIRTY)
@@ -159,6 +181,7 @@ PixlAnalyzerOLED: CFLAGS += -DOLED_TYPE_SH1106
 PixlAnalyzerLCD: CFLAGS += -DLCD_TYPE_DEFAULT 
 
 LIB_FILES += -lc -lnosys -lm
+LIB_FILES += $(SDK_ROOT)/components/nfc/t2t_lib/nfc_t2t_lib_gcc.a
 
 # -------------------------------------------------------------------------
 # Default target
@@ -230,6 +253,18 @@ test:
 	        test/test_beacon.c src/radio/ble_beacon.c src/radio/ble_adv.c src/radio/ble_sensor.c -DBLE_BEACON_HOST_TEST \
 	        -o $(OUTPUT_DIRECTORY)/test_beacon
 	@$(OUTPUT_DIRECTORY)/test_beacon
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+		test/test_rc.c src/radio/rc_proto.c -o $(OUTPUT_DIRECTORY)/test_rc
+	@$(OUTPUT_DIRECTORY)/test_rc
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio -Iconfig -Isrc/app \
+		test/test_radar.c src/radio/radar.c -Isrc/app -o $(OUTPUT_DIRECTORY)/test_radar
+	@$(OUTPUT_DIRECTORY)/test_radar
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+		test/test_ndef.c src/radio/nfc_ndef.c -o $(OUTPUT_DIRECTORY)/test_ndef
+	@$(OUTPUT_DIRECTORY)/test_ndef
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+		test/test_unify.c src/radio/unifying.c -o $(OUTPUT_DIRECTORY)/test_unify
+	@$(OUTPUT_DIRECTORY)/test_unify
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc

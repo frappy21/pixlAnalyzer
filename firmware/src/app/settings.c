@@ -85,6 +85,15 @@ void settings_defaults(void)
     g_settings.sniff_bits = 0;      // payload bytes most significant bit first
     g_settings.beacon_type = 0;     // the plain name
     g_settings.beacon_int = 1;      // 250 ms
+
+    // v4
+    g_settings.intro_done = 0;
+    g_settings.home_screen = 0;     // SPECTRUM, the first carousel entry
+    g_settings.nfc_mode = 0;        // off until the NFC screen is opened
+    g_settings.nfc_msg_type = 0;    // URL
+    g_settings.nfc_uid_random = 0;  // stable UID from the device id
+    memset(g_settings.nfc_text, 0, sizeof(g_settings.nfc_text));
+    strcpy(g_settings.nfc_text, "PIXLANALYZER.GITHUB.IO");
 }
 
 // Values outside their range (a record from a buggy build, a bit flip that
@@ -118,6 +127,23 @@ static void sanitize(void)
         s->beacon_type = 0;
     if (s->beacon_int >= 5) // BLE_BEACON_INTV_COUNT
         s->beacon_int = 1;
+    if (s->nfc_mode > 2) // NFC_MODE_COUNT - 1
+        s->nfc_mode = 0;
+    if (s->nfc_msg_type > 1)
+        s->nfc_msg_type = 0;
+    if (s->nfc_uid_random > 1)
+        s->nfc_uid_random = 0;
+    // home_screen is clamped against the carousel at use, it counts the
+    // screens, and the count can change with the firmware
+    for (uint8_t i = 0; i < NFC_TEXT_MAX; i++)
+    {
+        char c = s->nfc_text[i];
+        if (c == 0)
+            break;
+        if (c < ' ' || c > '~')
+            s->nfc_text[i] = '-';
+    }
+    s->nfc_text[NFC_TEXT_MAX] = 0;
 }
 
 bool settings_dirty(void) { return m_dirty; }

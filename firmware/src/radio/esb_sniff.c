@@ -213,7 +213,7 @@ static bool wait_event(volatile uint32_t *event, uint32_t spins)
 // Both polarities of the alternating pattern, as logical RX addresses 0
 // (0xAA55, preamble 0xAA + first address byte 0x55) and 1 (0x55AA). The 40
 // raw bytes that follow the match are handed to the software decoder.
-static void radio_promiscuous(uint8_t freq, uint8_t rate)
+static void radio_promiscuous(uint8_t freq, uint8_t rate, uint8_t a0_a, uint8_t a0_b)
 {
     radio_disable();
 
@@ -227,17 +227,26 @@ static void radio_promiscuous(uint8_t freq, uint8_t rate)
                        (0 << RADIO_PCNF0_LFLEN_Pos) |
                        (0 << RADIO_PCNF0_S1LEN_Pos) |
                        (RADIO_PCNF0_PLEN_8bit << RADIO_PCNF0_PLEN_Pos);
+
+    // Two byte address match: [preamble polarity][first address byte].
+    // BALEN counts BASE bytes and the prefix is the first byte on air,
+    // so BALEN=1 matches exactly the preamble byte plus A0 and the capture
+    // starts at the second address byte - the frame model's convention.
+    // Logical 0/4 use the 0xAA preamble, 1/5 the 0x55 one; BASE0 holds A0
+    // candidate a, BASE1 candidate b, so both polarities of both fly at
+    // once. RXMATCH says which one locked.
     NRF_RADIO->PCNF1 = (ESB_CAPTURE_MAX << RADIO_PCNF1_MAXLEN_Pos) |
                        (ESB_CAPTURE_MAX << RADIO_PCNF1_STATLEN_Pos) |
-                       (2 << RADIO_PCNF1_BALEN_Pos) |
+                       (1 << RADIO_PCNF1_BALEN_Pos) |
                        (RADIO_PCNF1_ENDIAN_Big << RADIO_PCNF1_ENDIAN_Pos) |
                        (RADIO_PCNF1_WHITEEN_Disabled << RADIO_PCNF1_WHITEEN_Pos);
 
-    NRF_RADIO->BASE0 = 0x55000000u;
-    NRF_RADIO->BASE1 = 0xAA000000u;
-    NRF_RADIO->PREFIX0 = 0x55 << 8 | 0xAA;
+    NRF_RADIO->BASE0 = (uint32_t)a0_a << 24;
+    NRF_RADIO->BASE1 = (uint32_t)a0_b << 24;
+    NRF_RADIO->PREFIX0 = (0x55u << 8) | 0xAAu;
+    NRF_RADIO->PREFIX1 = (0x55u << 8) | 0xAAu;
     NRF_RADIO->TXADDRESS = 0;
-    NRF_RADIO->RXADDRESSES = 0x03; // both polarities
+    NRF_RADIO->RXADDRESSES = 0x33; // logical 0,1,4,5
 
     NRF_RADIO->CRCCNF = RADIO_CRCCNF_LEN_Disabled << RADIO_CRCCNF_LEN_Pos;
     NRF_RADIO->FREQUENCY = freq;
@@ -249,91 +258,122 @@ static void radio_promiscuous(uint8_t freq, uint8_t rate)
 void esb_sniff_run(uint16_t start_mhz, uint16_t end_mhz, uint16_t dwell_ms, uint8_t rate_mode,
                    bool payload_lsb)
 {
-    if (!m_w || end_mhz < start_mhz)
+    static const uint8_t generic[2] = {0x55, 0xAA};
+    esb_sniff_run_a0(start_mhz, end_mhz, dwell_ms, rate_mode, payload_lsb, generic, 2);
+}
+
+void esb_sniff_listen(uint16_t mhz, uint16_t dwell_ms, uint8_t rate_mode, bool payload_lsb,
+                      uint8_t a0_a, uint8_t a0_b)
+{
+    uint8_t pair[2] = {a0_a, a0_b};
+    esb_sniff_run_a0(mhz, mhz, dwell_ms, rate_mode, payload_lsb, pair, 2);
+}
+
+void esb_sniff_run_a0(uint16_t start_mhz, uint16_t end_mhz, uint16_t dwell_ms, uint8_t rate_mode,
+                      bool payload_lsb, const uint8_t *a0_list, uint8_t a0_count)
+{
+    if (!m_w || end_mhz < start_mhz || !a0_list || a0_count == 0)
         return;
+    if (a0_count > ESB_SNIFF_A0_MAX)
+        a0_count = ESB_SNIFF_A0_MAX;
 
     radio_hfxo_start();
+
+    // Pairs of A0 candidates fly together (BASE0/BASE1), so 4 armeings
+    // cover a0_count first bytes. The RC screen passes the known toy
+    // families, the generic sniffer the two nRF24 default ones.
+    uint8_t pairs = (uint8_t)((a0_count + 1) / 2);
 
     for (uint16_t mhz = start_mhz; mhz <= end_mhz; mhz++)
     {
         if (mhz < 2400 || mhz > 2500)
             continue;
 
-        for (int r = 0; r < 2; r++)
+        for (uint8_t pair = 0; pair < pairs; pair++)
         {
-            uint8_t rate;
-            if (rate_mode == ESB_SNIFF_PHY_1M)
-            {
-                if (r)
-                    continue;
-                rate = 1;
-            }
-            else if (rate_mode == ESB_SNIFF_PHY_2M)
-            {
-                if (r)
-                    continue;
-                rate = 2;
-            }
-            else // auto: 2Mbit gets the longer look, like esb_scan.c
-            {
-                rate = r ? 1 : 2;
-            }
+            uint8_t a0_a = a0_list[2 * pair];
+            uint8_t a0_b = (2 * pair + 1 < a0_count) ? a0_list[2 * pair + 1] : a0_a;
 
-            radio_promiscuous((uint8_t)(mhz - 2400), rate);
-
-            NRF_RADIO->EVENTS_READY = 0;
-            NRF_RADIO->TASKS_RXEN = 1;
-            if (!wait_event(&NRF_RADIO->EVENTS_READY, 200000))
-                continue;
-
-            uint32_t window_us = (uint32_t)dwell_ms * 1000u / (rate_mode == ESB_SNIFF_PHY_AUTO ? 3 : 1);
-            if (window_us == 0)
-                window_us = 1000;
-            uint32_t start_us = systime_us();
-            bool first = true;
-
-            while ((systime_us() - start_us) < window_us)
+            for (int r = 0; r < 2; r++)
             {
-                if (!first)
+                uint8_t rate;
+                if (rate_mode == ESB_SNIFF_PHY_1M)
                 {
-                    NRF_RADIO->EVENTS_END = 0;
-                    NRF_RADIO->TASKS_START = 1;
+                    if (r)
+                        continue;
+                    rate = 1;
                 }
-                first = false;
+                else if (rate_mode == ESB_SNIFF_PHY_2M)
+                {
+                    if (r)
+                        continue;
+                    rate = 2;
+                }
+                else // auto: 2Mbit gets the longer look, like esb_scan.c
+                {
+                    rate = r ? 1 : 2;
+                }
 
-                bool got = false;
+                radio_promiscuous((uint8_t)(mhz - 2400), rate, a0_a, a0_b);
+
+                NRF_RADIO->EVENTS_READY = 0;
+                NRF_RADIO->TASKS_RXEN = 1;
+                if (!wait_event(&NRF_RADIO->EVENTS_READY, 200000))
+                    continue;
+
+                uint32_t window_us = (uint32_t)dwell_ms * 1000u /
+                                     (rate_mode == ESB_SNIFF_PHY_AUTO ? 3 : 1);
+                if (pairs > 1)
+                    window_us /= pairs;
+                if (window_us == 0)
+                    window_us = 1000;
+                uint32_t start_us = systime_us();
+                bool first = true;
+
                 while ((systime_us() - start_us) < window_us)
                 {
-                    if (NRF_RADIO->EVENTS_END)
+                    if (!first)
                     {
                         NRF_RADIO->EVENTS_END = 0;
-                        got = true;
-                        break;
+                        NRF_RADIO->TASKS_START = 1;
                     }
+                    first = false;
+
+                    bool got = false;
+                    while ((systime_us() - start_us) < window_us)
+                    {
+                        if (NRF_RADIO->EVENTS_END)
+                        {
+                            NRF_RADIO->EVENTS_END = 0;
+                            got = true;
+                            break;
+                        }
+                    }
+                    if (!got)
+                        break;
+
+                    // RXMATCH is the logical address index that locked:
+                    // 0/1 are the 0xAA preamble with BASE0/BASE1's A0,
+                    // 4/5 the 0x55 preamble with the same two
+                    uint8_t match = NRF_RADIO->RXMATCH & 7;
+                    uint8_t first_addr = (match >= 4) ? a0_b : a0_a;
+                    uint8_t rssi = NRF_RADIO->RSSISAMPLE & RADIO_RSSISAMPLE_RSSISAMPLE_Msk;
+
+                    // The buffer was m_w->pkt[ring_head].raw; feed it without
+                    // disturbing the raw the ring write will do
+                    esb_sniff_feed((const uint8_t *)m_w->pkt[m_w->ring_head].raw, ESB_CAPTURE_MAX,
+                                   first_addr, rate, mhz, rssi, systime_ms(), payload_lsb);
+
+                    // The capture buffer is also the next ring slot: keep it
+                    NRF_RADIO->PACKETPTR = (uint32_t)m_w->pkt[m_w->ring_head].raw;
                 }
-                if (!got)
-                    break;
 
-                // Which polarity matched decides the first address byte the
-                // match consumed
-                uint8_t match = NRF_RADIO->RXMATCH & 7;
-                uint8_t first_addr = match ? 0xAA : 0x55;
-                uint8_t rssi = NRF_RADIO->RSSISAMPLE & RADIO_RSSISAMPLE_RSSISAMPLE_Msk;
+                NRF_RADIO->EVENTS_DISABLED = 0;
+                NRF_RADIO->TASKS_DISABLE = 1;
+                wait_event(&NRF_RADIO->EVENTS_DISABLED, 200000);
 
-                // The buffer was m_w->pkt[ring_head].raw; feed it without
-                // disturbing the raw the ring write will do
-                esb_sniff_feed((const uint8_t *)m_w->pkt[m_w->ring_head].raw, ESB_CAPTURE_MAX,
-                               first_addr, rate, mhz, rssi, systime_ms(), payload_lsb);
-
-                // The capture buffer is also the next ring slot: keep it
-                NRF_RADIO->PACKETPTR = (uint32_t)m_w->pkt[m_w->ring_head].raw;
+                power_watchdog_feed();
             }
-
-            NRF_RADIO->EVENTS_DISABLED = 0;
-            NRF_RADIO->TASKS_DISABLE = 1;
-            wait_event(&NRF_RADIO->EVENTS_DISABLED, 200000);
-
-            power_watchdog_feed();
         }
     }
 

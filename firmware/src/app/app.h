@@ -30,11 +30,13 @@
 typedef enum
 {
     APP_GROUP_HIDDEN = 0, // never in a menu, opened by another screen
-    APP_GROUP_SPECTRUM,
-    APP_GROUP_RECEIVE,
-    APP_GROUP_TRANSMIT,
-    APP_GROUP_TOOLS,
-    APP_GROUP_SYSTEM, // rows of the top level menu itself
+    APP_GROUP_SPECTRUM,  // RF tools: spectrum, meter, identify, top
+    APP_GROUP_RECEIVE,   // radios: BLE, Zigbee, ESB, sniffer
+    APP_GROUP_RC,        // RC and drones: the dash, the radar
+    APP_GROUP_NFC,       // the NFC antenna
+    APP_GROUP_TRANSMIT,  // the TX lab
+    APP_GROUP_TOOLS,     // sentry, log, presets, help
+    APP_GROUP_SYSTEM,    // rows of the top level menu itself
     APP_GROUP_COUNT
 } app_group_t;
 

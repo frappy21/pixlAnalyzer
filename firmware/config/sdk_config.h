@@ -5521,3 +5521,35 @@
 // <<< end of configuration section >>>
 #endif //SDK_CONFIG_H
 
+
+// <<< nfc additions, v1.3 >>>
+// <e> NRFX_NFCT_ENABLED - nrfx_nfct - NFCT driver (tag emulation)
+#ifndef NRFX_NFCT_ENABLED
+#define NRFX_NFCT_ENABLED 1
+#endif
+// <e> NRFX_TIMER_ENABLED - nrfx_timer - TIMER driver (NFCT workaround timer)
+#ifndef NRFX_TIMER_ENABLED
+#define NRFX_TIMER_ENABLED 1
+#endif
+// <q> NRFX_TIMER4_ENABLED - TIMER4 instance for the NFCT field workaround
+#ifndef NRFX_TIMER4_ENABLED
+#define NRFX_TIMER4_ENABLED 1
+#endif
+#ifndef NRFX_TIMER_DEFAULT_CONFIG_IRQ_PRIORITY
+#define NRFX_TIMER_DEFAULT_CONFIG_IRQ_PRIORITY 6
+#endif
+#ifndef NRFX_NFCT_DEFAULT_CONFIG_IRQ_PRIORITY
+#define NRFX_NFCT_DEFAULT_CONFIG_IRQ_PRIORITY 6
+#endif
+// <q> NRF_NFCT_ENABLED - legacy name for the same driver
+#ifndef NRF_NFCT_ENABLED
+#define NRF_NFCT_ENABLED 1
+#endif
+
+// The nrfx drivers read these CONFIG names (no legacy mapping here)
+#ifndef NRFX_NFCT_CONFIG_IRQ_PRIORITY
+#define NRFX_NFCT_CONFIG_IRQ_PRIORITY 6
+#endif
+#ifndef NRFX_TIMER_CONFIG_IRQ_PRIORITY
+#define NRFX_TIMER_CONFIG_IRQ_PRIORITY 6
+#endif

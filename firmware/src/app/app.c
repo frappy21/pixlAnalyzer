@@ -81,14 +81,49 @@ bool app_is_main(const app_screen_t *screen)
 }
 
 // Name of the new main screen in a framed box in the middle, drawn by every
-// flush while it is up
+// flush while it is up. The category (its menu group) rides along in the
+// micro font, so a spin through the carousel reads "RADIOS / BLE".
+static const char *home_category(const app_screen_t *screen)
+{
+    switch (screen->group)
+    {
+    case APP_GROUP_SPECTRUM:
+        return "RF TOOLS";
+    case APP_GROUP_RECEIVE:
+        return "RADIOS";
+    case APP_GROUP_RC:
+        return "RC + DRONES";
+    case APP_GROUP_NFC:
+        return "NFC";
+    case APP_GROUP_TRANSMIT:
+        return "TX LAB";
+    default:
+        return 0;
+    }
+}
+
 static void banner_draw(void)
 {
+    const char *cat = home_category(m_stack[0]);
+    int box_h = cat ? 18 : 13;
+    int box_y = cat ? 20 : 22;
     int w = gfx_text_width(m_banner) + 8;
+    if (cat)
+    {
+        int cw = gfx_text_micro_width(cat) + 8;
+        if (cw > w)
+            w = cw;
+    }
     int x = (DISP_W - w) / 2;
-    gfx_box(x, 22, w, 13, true, false);
-    gfx_box(x, 22, w, 13, false, true);
-    gfx_text(x + 4, 25, m_banner);
+    gfx_box(x, box_y, w, box_h, true, false);
+    gfx_box(x, box_y, w, box_h, false, true);
+    if (cat)
+    {
+        gfx_text_micro(x + 4, box_y + 3, cat);
+        gfx_text(x + 4, box_y + 9, m_banner);
+    }
+    else
+        gfx_text(x + 4, box_y + 3, m_banner);
 }
 
 static void home_set(uint8_t index)

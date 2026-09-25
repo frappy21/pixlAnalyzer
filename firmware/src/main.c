@@ -23,7 +23,10 @@
 #include "esb_tx.h"
 #include "flash_ext.h"
 #include "gfx.h"
+#include "jam.h"
 #include "led.h"
+#include "log_store.h"
+#include "nfc_tag.h"
 #include "power.h"
 #include "scanner.h"
 #include "scr_system.h"
@@ -164,8 +167,10 @@ static void housekeeping(uint32_t now)
     }
 
     // No dimming or sleeping while transmitting; sentry mode runs the
-    // display itself and is meant to be left alone for hours
-    if (tx_test_active() || esb_tx_active() || ble_beacon_active() || scr_sentry_active())
+    // display itself and is meant to be left alone for hours. The NFC tag
+    // is meant to be read by a phone with the screen dark.
+    if (tx_test_active() || esb_tx_active() || ble_beacon_active() || scr_sentry_active() ||
+        jam_active() || nfc_tag_active())
         return;
 
     uint32_t idle = now - app_last_input_ms();
@@ -249,6 +254,7 @@ int main(void)
     battery_update();
 
     flash_ext_init(); // identify the chip for the info screen, never written to
+    log_store_init(); // the event log position, if the consent is on
 
     scanner_init();
     scr_scanner_apply_band();
@@ -256,9 +262,20 @@ int main(void)
     ble_scan_init();
     esb_scan_init();
 
+    // The first boot tutorial: a fresh device, or one that never saw it
+    if (!g_settings.intro_done)
+    {
+        scr_intro_run();
+        app_note_input();
+    }
+
     power_watchdog_start();
 
     app_init();
+
+    // The configured start screen, clamped against the carousel
+    if (g_settings.home_screen && g_settings.home_screen < g_app_home_count)
+        app_home_select(g_app_home[g_settings.home_screen]);
 
     while (1)
     {
@@ -277,30 +294,55 @@ int main(void)
 #endif
 
         // Global long presses. On a main screen: long LEFT/RIGHT switch to
-        // the previous/next main screen, long MID opens the menu. Anywhere
-        // else a long LEFT closes whatever is open.
+        // the previous/next main screen (and keep switching while held: the
+        // spin), long MID opens the menu. Anywhere else a long LEFT closes
+        // whatever is open.
+        static uint8_t spin;    // 0 none, 1 left, 2 right
+        static uint32_t spin_ms;
+
         if (app_at_home())
         {
             if (buttons_long(BTN_LEFT))
             {
                 app_note_input();
                 app_home_switch(-1);
+                spin = 1;
+                spin_ms = now + 400;
             }
             else if (buttons_long(BTN_RIGHT))
             {
                 app_note_input();
                 app_home_switch(1);
+                spin = 2;
+                spin_ms = now + 400;
             }
             else if (buttons_long(BTN_MID))
             {
                 app_note_input();
                 app_open(&scr_menu);
             }
+            else if (spin)
+            {
+                // The hold continues: keep spinning through the screens
+                bool held = spin == 1 ? buttons_down(BTN_LEFT) : buttons_down(BTN_RIGHT);
+                if (!held)
+                    spin = 0;
+                else if ((int32_t)(now - spin_ms) >= 0)
+                {
+                    spin_ms = now + 120;
+                    app_note_input();
+                    app_home_switch(spin == 1 ? -1 : 1);
+                }
+            }
         }
-        else if (buttons_long(BTN_LEFT))
+        else
         {
-            app_note_input();
-            app_back();
+            spin = 0;
+            if (buttons_long(BTN_LEFT))
+            {
+                app_note_input();
+                app_back();
+            }
         }
 
         const app_screen_t *screen = app_current();

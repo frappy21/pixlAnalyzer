@@ -22,7 +22,7 @@ bootloader at 0x77000 does signed OTA DFU.
 | Display | SH1106 OLED **or** ST7565/ST7567 LCD, SPIM on P0.25 MOSI / P0.26 SCK / P0.27 CS / P0.28 DC / P0.29 RST / P0.30 backlight |
 | Input | joystick: P0.05 left, P0.06 click, P0.07 right (active low) |
 | Power | LiPo, ADC on AIN0 (P0.02), charger status P0.03 |
-| Extras | 2 MB SPI NOR on P0.18 (identified only, never written), LED P0.31, NFC antenna (unused) |
+| Extras | 2 MB SPI NOR on P0.18 (upper half is the event log, consent gated), LED P0.31, NFC antenna (now the NFC screen) |
 
 **SWD on the OLED unit goes through the USB-C connector.** The data pins are
 not USB: they carry SWD (xiaohai OLED board, connector J4). The board also has
@@ -157,6 +157,64 @@ Then flash `prebuilt/PixlAnalyzer{OLED,LCD}.zip` with nRF Connect.
 from atc1441, kept for reference. The ones to flash are in `prebuilt/`, or built
 by `make packages` into `firmware/build/`.)
 
+## v1.3: what was added
+
+The interface was rebuilt around categories before the screen count grew:
+the carousel is grouped (RF TOOLS, RADIOS, RC + DRONES, NFC) with the
+category in the switch banner, a held long left/right spins through it, the
+menu groups match, Settings is paged, the first boot shows a three page
+tutorial, and the start screen is a setting. Found and fixed on the way:
+the promiscuous front end's BALEN was one byte too long (it matched
+[preamble][A0][0x00], so only devices whose second address byte is 0x00
+could ever lock; now BALEN=1 matches [preamble][A0] exactly as the frame
+model assumed), and the ESB transmitter had the same off-by-one on its
+address length.
+
+New receive side:
+- **rc_proto.c**: the RC toy protocol table (Bayang, SymaX, X5C, H8 3D, MJX,
+  layouts from the nRF24 Multiprotocol project) - stick decode, checksums,
+  bind packets, and a generic byte-movement tracker for unknown protocols.
+- The sniffer cycles first-address-byte candidates (0x55, 0xAA, 0x00, 0xAB,
+  0x6D, 0xC4, 0xE7, 0xBB): two fly at once through BASE0/BASE1 with both
+  preamble polarities, so the known toy families and the Logitech pairing
+  address are catchable, not just 0x55-addressed mice.
+- **radar.c**: per-channel window accumulation, a signal table with verdicts
+  (ANALOG VIDEO / WIFI VIDEO / HOPPING / CONTROL LINK / CARRIER), the hunt
+  baseline and the microwave level logic.
+- **unifying.c**: Logitech Unifying frames decoded in the packet browser.
+- **log_store.c**: event records in the NOR's upper half, walked at boot.
+
+New transmit side (all with the house safety pattern):
+- **RC emulator** (scr_rc_tx.c): captured control packet, sticks edited
+  through rc_build, replayed through the ESB engine.
+- **jam.c** (scr_jam.c): random-data GFSK noise, band sweep, or WiFi
+  channel park, 30 s limit, lowest power default.
+- Unifying keystroke presets in the ESB TX inject mode.
+
+New NFC (nfc_ndef.c + nfc_tag.c + scr_nfc.c): the SDK's T2T binary library
+plus nrfx_nfct and the TIMER4 workaround, with the platform glue (the clock
+requests) implemented in this firmware instead of the SDK's clock driver.
+A stub nrf_log.h keeps the drivers linkable. Field detection, NDEF URI and
+text records, read counting, stable or random UID.
+
+Settings v4: intro_done, home_screen, nfc_mode, nfc_msg_type, nfc_uid_random,
+nfc_text[41]. The old records migrate as always.
+
+What was NOT done, and why:
+- Amiibo tag emulation (the platform's original NFC use): the user chose to
+  skip it - it needs an upload path for the bin dumps (SWD tool), which is
+  its own project.
+- ANT+ / DSMX / FrSky sync profiles: the on-air sync bytes of ANT could not
+  be verified from public sources (the 0x72/0xA5 claim looks like confusion
+  with the public ANT network key), and DSMX uses per-model sync words. The
+  A0 candidate machinery is the infrastructure that would carry them.
+- WiFi packet decode: 1 Mbps DSSS beacon sniffing through the WazaBee-style
+  trick remains research grade.
+- Zigbee transmit: still impossible on this chip (the receiver is a
+  software trick on the BLE 2M radio).
+- 5.8 GHz video and sub-GHz: no radio for it, only the 2.4 GHz band is
+  reachable.
+
 ## State of things
 
 Built and tested on the host; **the current build has not yet run on hardware**.
@@ -235,6 +293,19 @@ The boot screen shows **RESET: \<reason\>** and the raw battery reading for
    side) or in nRF Connect.
 9. Identify: point it at a known source (router, microwave oven) and see whether
    the verdict and the evidence numbers are sane.
+10. RC dash: power a Bayang/H8/MJX style toy transmitter on and see whether the
+    dash locks, the sticks move and the protocol name shows. With the sniffer
+    fix the first address byte families should now be catchable - report which
+    toys worked, the table's A0 list grows from that.
+11. Radar: check the verdicts against known sources (a 2.4GHz AV sender should
+    read ANALOG VIDEO, a router's channel WIFI VIDEO or CARRIER).
+12. NFC: MONITOR mode - touch a phone (field on, counter up, LED), TAG mode -
+    the URI opens in the browser. The SDK T2T library and our clock glue have
+    not run on this hardware before.
+13. Jammer: lowest power next to a self owned receiver, confirm it disturbs it
+    and stops itself.
+14. RC emulator: replay a captured control frame at the lowest power next to
+    the toy, confirm the toy reacts the same way.
 
 ## Layout
 
@@ -249,7 +320,8 @@ firmware/
     drivers/          display, spi_bus, buttons, battery, systime, power, led, flash
     gfx/              primitives and the two fonts
     radio/            scanner, ble_scan, ble_beacon, esb_frame, esb_scan,
-                      esb_sniff, esb_tx, zb_rx, tx_test, sweep_order
+                      esb_sniff, esb_tx, rc_proto, radar, jam, nfc_ndef,
+                      nfc_tag, log_store, unifying, zb_rx, tx_test, sweep_order
   test/               host side tests
   tools/
     mkdfu.py          signed OTA packages without nrfutil

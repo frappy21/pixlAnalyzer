@@ -24,7 +24,10 @@
 #include <stdint.h>
 
 #define SETTINGS_MAGIC 0x414C5850u // "PXLA"
-#define SETTINGS_VERSION 3
+#define SETTINGS_VERSION 4
+
+// Longest NFC tag text the settings carry
+#define NFC_TEXT_MAX 40
 
 // Data size of every version, for the migration
 #define SETTINGS_V1_SIZE 16
@@ -73,6 +76,14 @@ typedef struct
     uint8_t sniff_bits;  // ESB sniffer payload bit order: 0 MSB, 1 LSB
     uint8_t beacon_type; // beacon TX preset, ble_beacon_type_t
     uint8_t beacon_int;  // beacon TX interval index, see ble_beacon.h
+    // v4
+    uint8_t intro_done;   // the first boot tutorial was shown
+    uint8_t home_screen;  // which main screen the device starts on
+    uint8_t nfc_mode;     // nfc_mode_t, live again on the NFC screen entry
+    uint8_t nfc_msg_type; // nfc_msg_type_t
+    uint8_t nfc_uid_random; // randomise the NFCID1 on every start
+    char nfc_text[NFC_TEXT_MAX + 1]; // the tag's URI or text
+    uint8_t reserved3[2]; // keep the layout whole words
 } settings_data_t;
 
 extern settings_data_t g_settings;

@@ -25,6 +25,7 @@
 #include "tx_test.h"
 #include "ui.h"
 #include "ui_esb_tx.h"
+#include "unifying.h"
 
 enum
 {
@@ -34,7 +35,8 @@ enum
     ROW_CH,
     ROW_PWR,
     ROW_COUNT,
-    ROW_LEN, // inject only
+    ROW_SRC,  // inject only: the payload source
+    ROW_LEN,  // inject only
     ROW_PAYLOAD,
     ROW_COUNT_ALL
 };
@@ -42,6 +44,13 @@ enum
 // Packet count choices, index 0 is "until stopped"
 static const uint16_t count_values[] = {0, 1, 8, 32, 128};
 #define COUNT_CHOICES 5
+
+// Injection payload sources: a raw pattern, or one of the Unifying frames
+// for keystroke testing on one's own receiver
+static const char *const src_names[] = {
+    "PATTERN", "KEY A", "KEY RET", "KEY ESC", "RELEASE", "KEEP-A",
+};
+#define SRC_CHOICES 6
 
 #define REPLAY_GAP_US 2000
 
@@ -56,8 +65,39 @@ static uint8_t m_rate = 2; // 1M/2M
 static uint16_t m_mhz = 2440;
 static uint8_t m_power = TX_POWER_MIN;
 static uint8_t m_count_sel = 2; // 8 packets
+static uint8_t m_src;           // injection payload source
 static uint8_t m_plen = 8;
 static uint8_t m_payload[ESB_MAX_PAYLOAD];
+
+// Loads the selected payload source into m_payload
+static void src_load(void)
+{
+    memset(m_payload, 0, sizeof(m_payload));
+
+    switch (m_src)
+    {
+    case 1:
+        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x04);
+        break;
+    case 2:
+        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x28);
+        break;
+    case 3:
+        m_plen = unify_build_keystroke(m_payload, ESB_MAX_PAYLOAD, 0x00, 0, 0x29);
+        break;
+    case 4:
+        m_plen = unify_build_release(m_payload, ESB_MAX_PAYLOAD, 0x00);
+        break;
+    case 5:
+        m_plen = unify_build_keepalive(m_payload, ESB_MAX_PAYLOAD, 0x00);
+        break;
+    default:
+        for (uint8_t i = 0; i < ESB_MAX_PAYLOAD; i++)
+            m_payload[i] = i;
+        m_plen = 8;
+        break;
+    }
+}
 
 // The editor cursor: nibble index into m_payload, 0..2*plen-1
 static uint8_t m_cursor;
@@ -83,7 +123,7 @@ static void values_format(char storage[ROW_COUNT_ALL][10])
 static void rows_draw(void)
 {
     static const char *const items[ROW_COUNT_ALL] = {
-        "Back", "Mode", "Rate", "Channel", "Power", "Count", "Length", "Payload",
+        "Back", "Mode", "Rate", "Channel", "Power", "Count", "Source", "Length", "Payload",
     };
     static char storage[ROW_COUNT_ALL][10];
     const char *vals[ROW_COUNT_ALL];
@@ -94,11 +134,12 @@ static void rows_draw(void)
     vals[ROW_CH] = storage[ROW_CH];
     vals[ROW_PWR] = tx_power_name(m_power);
     vals[ROW_COUNT] = storage[ROW_COUNT];
+    vals[ROW_SRC] = src_names[m_src];
     vals[ROW_LEN] = storage[ROW_LEN];
     vals[ROW_PAYLOAD] = m_mode ? "EDIT >" : "-";
     vals[ROW_BACK] = "";
 
-    // The Length and Payload rows only exist for injection
+    // The Source, Length and Payload rows only exist for injection
     uint8_t count = m_mode ? ROW_COUNT_ALL : ROW_COUNT;
 
     ui_list(m_edit ? "TX: EDIT" : "ESB TX", items, count, m_row_sel, vals);
@@ -121,6 +162,11 @@ static void tx_enter(void)
         m_mode = 0;
         m_rate = cap.rate ? cap.rate : 2;
         m_mhz = cap.mhz;
+    }
+    else
+    {
+        m_mode = 1;
+        src_load();
     }
 }
 
@@ -236,6 +282,11 @@ static void config_tick(void)
                 break;
             case ROW_COUNT:
                 m_count_sel = (uint8_t)((m_count_sel + COUNT_CHOICES + dir) % COUNT_CHOICES);
+                break;
+            case ROW_SRC:
+                m_src = (uint8_t)((m_src + SRC_CHOICES + dir) % SRC_CHOICES);
+                src_load();
+                m_cursor = 0;
                 break;
             case ROW_LEN:
             {

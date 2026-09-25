@@ -120,7 +120,7 @@ static void identify_tick(uint32_t now)
 
 const app_screen_t scr_identify = {
     .name = "Identify",
-    .group = APP_GROUP_RECEIVE,
+    .group = APP_GROUP_SPECTRUM,
     .tick = identify_tick,
     .busy = true,
 };

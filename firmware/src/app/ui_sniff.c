@@ -4,6 +4,7 @@
 #include "gfx.h"
 #include "ui.h"
 #include "ui_sniff.h"
+#include "unifying.h"
 
 static const char hex_digits[] = "0123456789ABCDEF";
 
@@ -142,9 +143,48 @@ void ui_sniff_pkt(const esb_pkt_t *p, uint8_t pos, uint8_t count, bool captured)
     gfx_text_micro(32, 19, buf);
     gfx_text_micro(32 + gfx_text_micro_width(buf) + 2, 19, p->f.noack ? "NOACK" : "ACK");
 
-    // The address, byte per byte
+    // The address, byte per byte; a Unifying frame names itself and its
+    // key on the same row, on the right of the address
     hex_row(buf, p->f.addr, p->f.addr_len);
-    gfx_text_micro(2, 26, buf);
+    gfx_text_micro(40, 26, buf);
+
+    unify_view_t uv;
+    if (unify_decode(p->f.payload, p->f.plen, &uv))
+    {
+        char line[22];
+        uint8_t k = 0;
+        const char *kn = unify_kind_name(uv.kind);
+        while (*kn && k + 1 < sizeof(line))
+            line[k++] = *kn++;
+
+        if (uv.kind == UNIFY_KEY)
+        {
+            for (uint8_t i = 0; i < 6 && k + 1 < sizeof(line); i++)
+            {
+                if (!uv.keys[i])
+                    break;
+                const char *name = unify_key_name(uv.keys[i]);
+                if (name)
+                    while (*name && k + 1 < sizeof(line))
+                        line[k++] = *name++;
+                else
+                    line[k++] = '?';
+            }
+        }
+        else if (uv.kind == UNIFY_MOUSE)
+        {
+            line[k++] = ' ';
+            if (uv.dx >= 0)
+                line[k++] = '+';
+            gfx_fmt_int(&line[k], uv.dx);
+            k = (uint8_t)strlen(line);
+            if (uv.dy >= 0)
+                line[k++] = '+';
+            gfx_fmt_int(&line[k], uv.dy);
+        }
+        line[k] = 0;
+        gfx_text_micro(2, 26, line);
+    }
 
     // Payload hex, eight bytes per row
     if (p->f.plen == 0)

@@ -7,6 +7,7 @@
     X(scr_scanner)         \
     X(scr_menu)            \
     X(scr_group)           \
+    X(scr_intro)           \
     X(scr_top)             \
     X(scr_meter)           \
     X(act_overlay)         \
@@ -35,28 +36,44 @@
     X(scr_zigbee_pan)      \
     X(scr_sniff)           \
     X(scr_sniff_pkt)       \
+    X(scr_rc)              \
+    X(scr_radar)           \
+    X(scr_nfc)             \
     X(scr_tx)              \
     X(scr_esb_tx)          \
     X(scr_esb_payload)     \
+    X(scr_rc_tx)           \
+    X(scr_jam)             \
     X(scr_beacon)          \
     X(scr_settings)        \
     X(scr_presets)         \
     X(scr_sentry)          \
+    X(scr_log)             \
     X(scr_info)            \
     X(scr_help)            \
     X(act_sleep)           \
     X(act_dfu)
 
-// The main screens, in carousel order, with the name shown when switching to
-// one. The first one is where the device starts. Each must also be in
-// APP_SCREEN_LIST above.
-#define APP_HOME_LIST(X)          \
-    X(scr_scanner, "SPECTRUM")    \
-    X(scr_top, "WIFI")            \
-    X(scr_ble, "BLE")             \
-    X(scr_esb, "RC")              \
-    X(scr_zigbee, "ZIGBEE")       \
-    X(scr_sniff, "SNIFF")
+// The main screens, in carousel order, grouped by category. The banner
+// shows the category when it changes, the screen name otherwise. The first
+// one is the default home screen; the settings can start the device on any
+// of them (home_screen).
+#define APP_HOME_LIST(X)            \
+    /* RF tools */                   \
+    X(scr_scanner, "SPECTRUM")       \
+    X(scr_top, "WIFI")               \
+    X(scr_meter, "METER")            \
+    X(scr_identify, "IDENTIFY")      \
+    /* radios */                     \
+    X(scr_ble, "BLE")                \
+    X(scr_zigbee, "ZIGBEE")          \
+    X(scr_esb, "RC SNIFF")           \
+    X(scr_sniff, "SNIFF")            \
+    /* RC and drones */              \
+    X(scr_rc, "RC DASH")             \
+    X(scr_radar, "RADAR")            \
+    /* NFC */                        \
+    X(scr_nfc, "NFC")
 
 #define APP_SCREEN_EXTERN(s) extern const app_screen_t s;
 #define APP_SCREEN_ENTRY(s) &s,

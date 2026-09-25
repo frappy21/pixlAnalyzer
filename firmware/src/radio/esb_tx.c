@@ -47,7 +47,7 @@ static void radio_setup(void)
                        (RADIO_PCNF0_PLEN_8bit << RADIO_PCNF0_PLEN_Pos);
     NRF_RADIO->PCNF1 = ((uint32_t)m_cfg.raw_len << RADIO_PCNF1_MAXLEN_Pos) |
                        ((uint32_t)m_cfg.raw_len << RADIO_PCNF1_STATLEN_Pos) |
-                       ((uint32_t)m_cfg.addr_len << RADIO_PCNF1_BALEN_Pos) |
+                       ((uint32_t)(m_cfg.addr_len - 1) << RADIO_PCNF1_BALEN_Pos) |
                        (RADIO_PCNF1_ENDIAN_Big << RADIO_PCNF1_ENDIAN_Pos) |
                        (RADIO_PCNF1_WHITEEN_Disabled << RADIO_PCNF1_WHITEEN_Pos);
 
