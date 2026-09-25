@@ -180,6 +180,10 @@ test:
 		test/test_spectrum_render.c src/gfx/gfx.c src/gfx/font3x5.c src/gfx/font5x7.c \
 		src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_render
 	@$(OUTPUT_DIRECTORY)/test_spectrum_render
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+		test/test_ble.c src/radio/ble_adv.c src/radio/ble_sensor.c src/radio/ble_devtab.c \
+		-o $(OUTPUT_DIRECTORY)/test_ble
+	@$(OUTPUT_DIRECTORY)/test_ble
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc
