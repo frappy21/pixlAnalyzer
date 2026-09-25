@@ -22,6 +22,24 @@ This Firmware is currently compatible with the LCD and OLED variant you can get 
   are consistent with - and how confident that is.
 * **BLE scan**: actual advertising packets with a CRC check, listing devices, names, RSSI and
   tracker families (FindMy, Tile, SmartTag, Google), plus how long each has been in range.
+* **Zigbee**: 802.15.4 frames received through the WazaBee trick (MSK chip correlation on the
+  BLE 2M receiver), MAC headers decoded, PANs listed with their addresses, beacons and
+  permit-join status, all FCS checked.
+* **ESB snif**: ShockBurst packets actually decoded, not just counted. The promiscuous front
+  end catches the preamble on both polarities, the software decoder checks the CRC over the
+  PCF and payload for every address length, and what validates goes into an address book and
+  a packet browser with a payload hex view. The bit order ambiguity of the nRF24
+  documentation is handled by trying the candidate CRC engines and byte orders until one
+  validates, and the payload byte order is a setting to flip against a live device.
+* **ESB TX**: the transmit side of the sniffer, a lab tool for self owned links. Replays a
+  captured packet bit for bit (the raw capture is sent verbatim after the recovered address),
+  or injects a crafted one through a three button hex editor. Lowest power default, a one
+  second hold to start, any button stops it, and it stops itself after 30 s.
+* **Beacon TX**: the transmit side of the BLE decoder, for self tests. Six presets (plain
+  name, iBeacon, Eddystone UID, Eddystone URL, AltBeacon, Swift Pair, Apple type 0x12
+  offline finding) that each decode back through this firmware's own classifier — the host
+  tests prove it. Advertising address derived from the device id, one channel per event,
+  37/38/39 rotating, 60 s limit.
 * **Mouse/Kbd**: ShockBurst / nRF24 presence detection across the band.
 * **Busiest**: the five busiest channels and a "use WiFi channel N" verdict.
 * **Meter**: single frequency hunting mode with a trend graph and the LED as a signal indicator.
@@ -29,6 +47,10 @@ This Firmware is currently compatible with the LCD and OLED variant you can get 
   stops itself after 30 seconds.
 * Settings persisted in flash, auto dim and auto sleep, brownout protection, a watchdog, and a
   battery gauge that does not lie.
+
+The transmit tools are for research on your own devices in your own lab: replaying or
+injecting packets into someone else's equipment, or advertising an address that is not yours,
+is not what they are for. The ESB TX and Beacon TX screens say so on their confirm pages.
 
 Buttons: left and right act on the selected tool, a short press of the middle button opens the
 menu, a long press cycles the tool (marker, span, waterfall speed, history scroll).
@@ -70,6 +92,9 @@ firmware/
       spectrum.c        traces, peak/max hold, reference, waterfall history
       classify.c        traffic classification from RSSI evidence
       channels.c        WiFi / BLE / 802.15.4 channel plans and scoring
+      scr_sniff.c       ESB sniffer main screen and the packet browser
+      scr_esb_tx.c      ESB transmitter screen and its payload editor
+      scr_beacon.c      beacon transmitter screen
       settings.c        settings persisted in the DFU app data page
       ui.c              every screen
     drivers/
@@ -89,7 +114,12 @@ firmware/
     radio/
       scanner.c         RSSI sweep with fast ramp-up and dwell, park capture
       ble_scan.c        real BLE advertising receiver with CRC check
+      ble_beacon.c      beacon payload builders and the advertising transmitter
+      esb_frame.c       Enhanced ShockBurst frame model: decode, build, CRC
       esb_scan.c        ShockBurst / nRF24 presence detection
+      esb_sniff.c       ESB sniffer: promiscuous capture, address book, packet ring
+      esb_tx.c          ESB packet transmitter, bit exact replay
+      zb_rx.c           802.15.4 receiver through BLE 2M chip correlation
       tx_test.c         unmodulated test carrier
   test/                 host side tests (make test)
   tools/mkdfu.py        signed OTA packaging without nrfutil

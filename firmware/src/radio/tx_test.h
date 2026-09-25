@@ -32,4 +32,8 @@ void tx_test_update(uint32_t now_ms);
 uint32_t tx_test_remaining_ms(uint32_t now_ms);
 const char *tx_power_name(uint8_t power);
 
+// The RADIO_TXPOWER register value of one step, shared with the other
+// transmitters (esb_tx, ble_beacon)
+uint32_t tx_power_reg(uint8_t power);
+
 #endif // PIXLA_TX_TEST_H

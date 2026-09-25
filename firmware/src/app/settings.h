@@ -15,6 +15,7 @@
  * bytes and filling the new fields with their defaults.
  *   v1: contrast .. reserved (16 bytes)
  *   v2: + invert, burnin, saver_min, sentry_db, sentry_period (24 bytes)
+ *   v3: + sniff_rate, sniff_bits, beacon_type, beacon_int (28 bytes)
  */
 #ifndef PIXLA_SETTINGS_H
 #define PIXLA_SETTINGS_H
@@ -23,7 +24,7 @@
 #include <stdint.h>
 
 #define SETTINGS_MAGIC 0x414C5850u // "PXLA"
-#define SETTINGS_VERSION 2
+#define SETTINGS_VERSION 3
 
 // Data size of every version, for the migration
 #define SETTINGS_V1_SIZE 16
@@ -67,6 +68,11 @@ typedef struct
     uint8_t sentry_db;     // sentry mode: dB above the noise floor that counts as activity
     uint8_t sentry_period; // sentry mode: one sweep every this many 100ms
     uint8_t reserved2[3];
+    // v3
+    uint8_t sniff_rate;  // ESB sniffer PHY: 0 auto, 1 2Mbit, 2 1Mbit
+    uint8_t sniff_bits;  // ESB sniffer payload bit order: 0 MSB, 1 LSB
+    uint8_t beacon_type; // beacon TX preset, ble_beacon_type_t
+    uint8_t beacon_int;  // beacon TX interval index, see ble_beacon.h
 } settings_data_t;
 
 extern settings_data_t g_settings;

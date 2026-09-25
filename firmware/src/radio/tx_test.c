@@ -109,3 +109,8 @@ const char *tx_power_name(uint8_t power)
         return "?";
     }
 }
+
+uint32_t tx_power_reg(uint8_t power)
+{
+    return power < TX_POWER_COUNT ? power_reg[power] : power_reg[TX_POWER_MIN];
+}

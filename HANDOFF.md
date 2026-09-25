@@ -223,7 +223,17 @@ The boot screen shows **RESET: \<reason\>** and the raw battery reading for
    devices appear.
 5. Mouse/Kbd screen: whether a real wireless mouse shows up, and whether it
    false-triggers in a quiet room.
-6. Identify: point it at a known source (router, microwave oven) and see whether
+6. Sniff: with the mouse moving, whether the SNIFF screen fills addresses
+   and the packet browser decodes (CRC valid). If nothing decodes, try the
+   Sniff bits setting (MSB/LSB payload byte order) - the nRF24 bit order is
+   the one thing the documentation does not settle, the CRC models are tried
+   automatically. Report what worked so the default can be corrected.
+7. ESB TX: replay a captured packet at the lowest power next to the
+   receiver under test, and check it is still received as the same packet.
+8. Beacon TX: run each preset and watch it arrive in this firmware's own BLE
+   list (the host tests prove the payloads decode, this checks the radio
+   side) or in nRF Connect.
+9. Identify: point it at a known source (router, microwave oven) and see whether
    the verdict and the evidence numbers are sane.
 
 ## Layout
@@ -238,7 +248,8 @@ firmware/
     app/              spectrum, classify, channels, settings, ui
     drivers/          display, spi_bus, buttons, battery, systime, power, led, flash
     gfx/              primitives and the two fonts
-    radio/            scanner, ble_scan, esb_scan, tx_test, sweep_order
+    radio/            scanner, ble_scan, ble_beacon, esb_frame, esb_scan,
+                      esb_sniff, esb_tx, zb_rx, tx_test, sweep_order
   test/               host side tests
   tools/
     mkdfu.py          signed OTA packages without nrfutil
@@ -246,6 +257,33 @@ firmware/
     flash_jlink.sh    read page, regenerate, program app + page
   sdk/                nRF5 SDK 17.1.0
 ```
+
+## The research tools, and their limits
+
+The ESB side (sniffer + transmitter) is built on the promiscuous front end
+the Mouse/Kbd screen uses: the receiver matches two alternating bytes
+(0xAA55 and 0x55AA, both polarities) and captures 40 raw bytes after the
+match. `esb_frame.c` decodes those in software: for every address length
+2..5 it reads the 9 bit packet control field, takes the payload length and
+runs a CRC-16 over PCF and payload. The nRF24 documentation calls that CRC
+"CCITT" without settling the serial form or the byte order, so four models
+(two serial forms, both byte orders) are tried and the validating one is
+kept per packet; the payload byte bit order is a setting, because the CRC
+cannot tell it apart. A validated decode recovers the full address (the
+match fixes the first byte, the capture holds the rest), so a replay is the
+raw capture sent verbatim after that address - bit exact, whatever the
+decode made of it. Synthetic packets go through `esb_frame_build()` with
+the same model the capture decoded with.
+
+Two limits worth knowing: a promiscuous lock can slide into a packet at a
+non-byte-aligned position (the CRC rejects those), and 802.15.4 transmit is
+not possible on this chip at all - the Zigbee receiver works by correlating
+MSK chips on the BLE 2M receiver, a receive-only trick.
+
+The transmit tools follow the TX test rules: lowest power default, a one
+second hold to start, any button stops, an auto stop, and the radio is
+handed back on every exit path. They are meant for research on self owned
+devices in a lab - the same discipline the receive side keeps.
 
 ## Licence
 

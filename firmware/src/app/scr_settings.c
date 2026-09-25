@@ -3,6 +3,7 @@
 
 #include "app_config.h"
 #include "battery.h"
+#include "ble_beacon.h"
 #include "display.h"
 #include "gfx.h"
 #include "scanner.h"
@@ -32,6 +33,10 @@ enum
 #endif
     SET_SENTRY_DB,
     SET_SENTRY_MS,
+    SET_SNIFFPHY,
+    SET_SNIFFBITS,
+    SET_BEACON,
+    SET_BEACONINT,
     SET_COUNT
 };
 
@@ -42,6 +47,7 @@ static const char *const settings_items[SET_COUNT] = {
     "Px shift", "Saver m",
 #endif
     "Sentry dB", "Sentry ms",
+    "Sniff PHY", "Sniff bits", "Beacon", "Beacon int",
 };
 
 static uint8_t m_settings_sel;
@@ -110,6 +116,17 @@ static void settings_values(const char *values[SET_COUNT], char storage[SET_COUN
 
     gfx_fmt_int(storage[SET_SENTRY_MS], g_settings.sentry_period * 100);
     values[SET_SENTRY_MS] = storage[SET_SENTRY_MS];
+
+    values[SET_SNIFFPHY] = g_settings.sniff_rate == 1   ? "2M"
+                           : g_settings.sniff_rate == 2 ? "1M"
+                                                        : "AUTO";
+    values[SET_SNIFFBITS] = g_settings.sniff_bits ? "LSB" : "MSB";
+    values[SET_BEACON] = ble_beacon_name(g_settings.beacon_type);
+    gfx_fmt_int(storage[SET_BEACONINT],
+                (int)ble_beacon_intervals[g_settings.beacon_int < BLE_BEACON_INTV_COUNT
+                                              ? g_settings.beacon_int
+                                              : 0]);
+    values[SET_BEACONINT] = storage[SET_BEACONINT];
 }
 
 static void settings_adjust(int dir)
@@ -213,6 +230,30 @@ static void settings_adjust(int dir)
     {
         int v = g_settings.sentry_period + dir;
         g_settings.sentry_period = (uint8_t)(v < 1 ? 1 : (v > 50 ? 50 : v));
+        break;
+    }
+    case SET_SNIFFPHY:
+    {
+        int v = g_settings.sniff_rate + dir;
+        g_settings.sniff_rate = (uint8_t)(v < 0 ? 2 : (v > 2 ? 0 : v));
+        break;
+    }
+    case SET_SNIFFBITS:
+        g_settings.sniff_bits = !g_settings.sniff_bits;
+        break;
+    case SET_BEACON:
+    {
+        int v = g_settings.beacon_type + dir;
+        g_settings.beacon_type =
+            (uint8_t)(v < 0 ? BLE_BEACON_TYPE_COUNT - 1
+                            : (v >= BLE_BEACON_TYPE_COUNT ? 0 : v));
+        break;
+    }
+    case SET_BEACONINT:
+    {
+        int v = g_settings.beacon_int + dir;
+        g_settings.beacon_int = (uint8_t)(v < 0 ? BLE_BEACON_INTV_COUNT - 1
+                                                : (v >= BLE_BEACON_INTV_COUNT ? 0 : v));
         break;
     }
     default:

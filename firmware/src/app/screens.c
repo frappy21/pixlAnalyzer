@@ -33,7 +33,12 @@
     X(scr_esb)             \
     X(scr_zigbee)          \
     X(scr_zigbee_pan)      \
+    X(scr_sniff)           \
+    X(scr_sniff_pkt)       \
     X(scr_tx)              \
+    X(scr_esb_tx)          \
+    X(scr_esb_payload)     \
+    X(scr_beacon)          \
     X(scr_settings)        \
     X(scr_presets)         \
     X(scr_sentry)          \
@@ -50,7 +55,8 @@
     X(scr_top, "WIFI")            \
     X(scr_ble, "BLE")             \
     X(scr_esb, "RC")              \
-    X(scr_zigbee, "ZIGBEE")
+    X(scr_zigbee, "ZIGBEE")       \
+    X(scr_sniff, "SNIFF")
 
 #define APP_SCREEN_EXTERN(s) extern const app_screen_t s;
 #define APP_SCREEN_ENTRY(s) &s,

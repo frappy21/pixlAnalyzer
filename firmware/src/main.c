@@ -14,11 +14,13 @@
 #include "app.h"
 #include "app_config.h"
 #include "battery.h"
+#include "ble_beacon.h"
 #include "ble_scan.h"
 #include "board_config.h"
 #include "buttons.h"
 #include "display.h"
 #include "esb_scan.h"
+#include "esb_tx.h"
 #include "flash_ext.h"
 #include "gfx.h"
 #include "led.h"
@@ -163,7 +165,7 @@ static void housekeeping(uint32_t now)
 
     // No dimming or sleeping while transmitting; sentry mode runs the
     // display itself and is meant to be left alone for hours
-    if (tx_test_active() || scr_sentry_active())
+    if (tx_test_active() || esb_tx_active() || ble_beacon_active() || scr_sentry_active())
         return;
 
     uint32_t idle = now - app_last_input_ms();

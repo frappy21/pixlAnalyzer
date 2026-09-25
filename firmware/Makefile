@@ -1,7 +1,6 @@
 PROJECT_NAME     := secure_bootloader_ble_s112_pca10040
 TARGETS          := PixlAnalyzerOLED PixlAnalyzerLCD
 OUTPUT_DIRECTORY := build
-
 # Toolchain: the SDK defaults to a fixed Linux path, so pick up whatever
 # arm-none-eabi-gcc is in PATH instead. Override on the command line if needed.
 ARM_GCC := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
@@ -31,14 +30,17 @@ SRC_FILES += \
   src/app/app.c \
   src/app/channels.c \
   src/app/classify.c \
+  src/app/scr_beacon.c \
   src/app/scr_ble.c \
   src/app/scr_ble_sensors.c \
   src/app/scr_esb.c \
+  src/app/scr_esb_tx.c \
   src/app/scr_identify.c \
   src/app/scr_info.c \
   src/app/scr_menu.c \
   src/app/scr_scanner.c \
   src/app/scr_settings.c \
+  src/app/scr_sniff.c \
   src/app/scr_system.c \
   src/app/scr_tx.c \
   src/app/scr_zigbee.c \
@@ -46,9 +48,12 @@ SRC_FILES += \
   src/app/settings.c \
   src/app/spectrum.c \
   src/app/ui.c \
+  src/app/ui_beacon.c \
   src/app/ui_ble.c \
   src/app/ui_esb.c \
+  src/app/ui_esb_tx.c \
   src/app/ui_info.c \
+  src/app/ui_sniff.c \
   src/app/ui_sys.c \
   src/app/ui_tx.c \
   src/app/ui_zigbee.c \
@@ -66,11 +71,15 @@ SRC_FILES += \
   src/gfx/font5x7.c \
   src/gfx/gfx.c \
   src/radio/ble_adv.c \
+  src/radio/ble_beacon.c \
   src/radio/ble_devtab.c \
   src/radio/ble_scan.c \
   src/radio/ble_sensor.c \
   src/radio/dwell.c \
+  src/radio/esb_frame.c \
   src/radio/esb_scan.c \
+  src/radio/esb_sniff.c \
+  src/radio/esb_tx.c \
   src/radio/scanner.c \
   src/radio/sweep_order.c \
   src/radio/tx_test.c \
@@ -115,7 +124,7 @@ CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
 # Firmware identity (src/app/version.c): the release number, bumped by hand,
 # and the commit the image was built from, "+" appended for a dirty tree
-FW_VERSION := 1.1
+FW_VERSION := 1.2
 FW_GIT_HASH := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
 FW_GIT_DIRTY := $(shell git status --porcelain --untracked-files=no 2>/dev/null | grep -q . && echo 1 || echo 0)
 CFLAGS += -DFW_VERSION=\"$(FW_VERSION)\" -DFW_GIT_HASH=\"$(FW_GIT_HASH)\" -DFW_GIT_DIRTY=$(FW_GIT_DIRTY)
@@ -161,8 +170,8 @@ default: $(TARGETS)
 	@echo "Generating OTA Packages (.zip) for all targets..."
 	@echo "------------------------------------------------"
 	$(foreach target, $(TARGETS), \
-		echo "Creating $(target).zip ..."; \
-		nrfutil pkg generate --application $(OUTPUT_DIRECTORY)/$(target).hex --application-version 99 --hw-version 52 --sd-req 0x0103 --key-file priv.pem $(target).zip; \
+	        echo "Creating $(target).zip ..."; \
+	        nrfutil pkg generate --application $(OUTPUT_DIRECTORY)/$(target).hex --application-version 99 --hw-version 52 --sd-req 0x0103 --key-file priv.pem $(target).zip; \
 	)
 	@echo "Done."
 
@@ -175,7 +184,7 @@ packages: $(TARGETS)
 	@echo "Generating OTA Packages (.zip) with tools/mkdfu.py ..."
 	@echo "------------------------------------------------"
 	$(foreach target, $(TARGETS), \
-		python3 tools/mkdfu.py $(OUTPUT_DIRECTORY)/$(target).bin $(OUTPUT_DIRECTORY)/$(target).zip; )
+	        python3 tools/mkdfu.py $(OUTPUT_DIRECTORY)/$(target).bin $(OUTPUT_DIRECTORY)/$(target).zip; )
 
 # -------------------------------------------------------------------------
 # Host side tests: compile a driver against stubs and run it on this machine
@@ -183,36 +192,44 @@ packages: $(TARGETS)
 test:
 	@mkdir -p $(OUTPUT_DIRECTORY)
 	$(CC_HOST) -std=c11 -Wall -Wextra -Itest/stubs -Isrc/drivers -Iconfig \
-		test/test_buttons.c src/drivers/buttons.c -o $(OUTPUT_DIRECTORY)/test_buttons
+	        test/test_buttons.c src/drivers/buttons.c -o $(OUTPUT_DIRECTORY)/test_buttons
 	@$(OUTPUT_DIRECTORY)/test_buttons
 	$(CC_HOST) -std=c11 -Wall -Wextra -DCLASSIFY_HOST_TEST -DSETTINGS_HOST_TEST \
-		-DFLASH_INT_PAGE_SIZE_HOST=4096 -Iconfig -Isrc/app -Isrc/radio \
-		test/test_classify.c src/app/classify.c src/app/settings.c \
-		-o $(OUTPUT_DIRECTORY)/test_classify
+	        -DFLASH_INT_PAGE_SIZE_HOST=4096 -Iconfig -Isrc/app -Isrc/radio \
+	        test/test_classify.c src/app/classify.c src/app/settings.c \
+	        -o $(OUTPUT_DIRECTORY)/test_classify
 	@$(OUTPUT_DIRECTORY)/test_classify
 	$(CC_HOST) -std=c11 -Wall -Wextra -DSETTINGS_HOST_TEST -DFLASH_INT_PAGE_SIZE_HOST=4096 \
-		-Iconfig -Isrc/app test/test_settings.c src/app/settings.c \
-		-o $(OUTPUT_DIRECTORY)/test_settings
+	        -Iconfig -Isrc/app test/test_settings.c src/app/settings.c \
+	        -o $(OUTPUT_DIRECTORY)/test_settings
 	@$(OUTPUT_DIRECTORY)/test_settings
 	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
-		test/test_sweep_order.c src/radio/sweep_order.c \
-		-o $(OUTPUT_DIRECTORY)/test_sweep_order
+	        test/test_sweep_order.c src/radio/sweep_order.c \
+	        -o $(OUTPUT_DIRECTORY)/test_sweep_order
 	@$(OUTPUT_DIRECTORY)/test_sweep_order
 	$(CC_HOST) -std=c11 -Wall -Wextra -DZB_RX_HOST_TEST -Isrc/radio \
-		test/test_zb_rx.c src/radio/zb_rx.c -o $(OUTPUT_DIRECTORY)/test_zb_rx
+	        test/test_zb_rx.c src/radio/zb_rx.c -o $(OUTPUT_DIRECTORY)/test_zb_rx
 	@$(OUTPUT_DIRECTORY)/test_zb_rx
 	$(CC_HOST) -std=c11 -Wall -Wextra -Iconfig -Isrc/app -Isrc/radio -Isrc/gfx -Isrc/drivers \
-		test/test_spectrum_render.c src/gfx/gfx.c src/gfx/font3x5.c src/gfx/font5x7.c \
-		src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_render
+	        test/test_spectrum_render.c src/gfx/gfx.c src/gfx/font3x5.c src/gfx/font5x7.c \
+	        src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_render
 	@$(OUTPUT_DIRECTORY)/test_spectrum_render
 	$(CC_HOST) -std=c11 -Wall -Wextra -Iconfig -Isrc/app -Isrc/radio -Isrc/gfx -Isrc/drivers \
-		test/test_spectrum_features.c src/radio/dwell.c src/gfx/gfx.c src/gfx/font3x5.c \
-		src/gfx/font5x7.c src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_features
+	        test/test_spectrum_features.c src/radio/dwell.c src/gfx/gfx.c src/gfx/font3x5.c \
+	        src/gfx/font5x7.c src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_features
 	@$(OUTPUT_DIRECTORY)/test_spectrum_features
 	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
-		test/test_ble.c src/radio/ble_adv.c src/radio/ble_sensor.c src/radio/ble_devtab.c \
-		-o $(OUTPUT_DIRECTORY)/test_ble
+	        test/test_ble.c src/radio/ble_adv.c src/radio/ble_sensor.c src/radio/ble_devtab.c \
+	        -o $(OUTPUT_DIRECTORY)/test_ble
 	@$(OUTPUT_DIRECTORY)/test_ble
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+	        test/test_esb.c src/radio/esb_frame.c src/radio/esb_sniff.c -DESB_SNIFF_HOST_TEST \
+	        -o $(OUTPUT_DIRECTORY)/test_esb
+	@$(OUTPUT_DIRECTORY)/test_esb
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
+	        test/test_beacon.c src/radio/ble_beacon.c src/radio/ble_adv.c src/radio/ble_sensor.c -DBLE_BEACON_HOST_TEST \
+	        -o $(OUTPUT_DIRECTORY)/test_beacon
+	@$(OUTPUT_DIRECTORY)/test_beacon
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc
@@ -248,4 +265,4 @@ flash-openocd: $(VARIANT)
 # The settings page on its own, e.g. to inspect it before flashing
 settings: $(VARIANT)
 	python3 tools/mkblsettings.py $(OUTPUT_DIRECTORY)/$(VARIANT).bin \
-		$(OUTPUT_DIRECTORY)/$(VARIANT)-settings.hex
+	        $(OUTPUT_DIRECTORY)/$(VARIANT)-settings.hex

@@ -79,6 +79,12 @@ void settings_defaults(void)
     g_settings.saver_min = 0;
     g_settings.sentry_db = 20;
     g_settings.sentry_period = 5;
+
+    // v3
+    g_settings.sniff_rate = 0;      // auto: 2Mbit first, then 1Mbit
+    g_settings.sniff_bits = 0;      // payload bytes most significant bit first
+    g_settings.beacon_type = 0;     // the plain name
+    g_settings.beacon_int = 1;      // 250 ms
 }
 
 // Values outside their range (a record from a buggy build, a bit flip that
@@ -104,6 +110,14 @@ static void sanitize(void)
         s->sentry_db = 20;
     if (s->sentry_period < 1 || s->sentry_period > 50)
         s->sentry_period = 5;
+    if (s->sniff_rate > 2)
+        s->sniff_rate = 0;
+    if (s->sniff_bits > 1)
+        s->sniff_bits = 0;
+    if (s->beacon_type >= 7) // BLE_BEACON_TYPE_COUNT
+        s->beacon_type = 0;
+    if (s->beacon_int >= 5) // BLE_BEACON_INTV_COUNT
+        s->beacon_int = 1;
 }
 
 bool settings_dirty(void) { return m_dirty; }

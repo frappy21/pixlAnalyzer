@@ -132,28 +132,40 @@ int main(void)
     check("new field saver_min takes its default", g_settings.saver_min, 0);
     check("new field sentry_db takes its default", g_settings.sentry_db, 20);
     check("new field sentry_period takes its default", g_settings.sentry_period, 5);
+    check("v3 sniff_rate takes its default", g_settings.sniff_rate, 0);
+    check("v3 sniff_bits takes its default", g_settings.sniff_bits, 0);
+    check("v3 beacon_type takes its default", g_settings.beacon_type, 0);
+    check("v3 beacon_int takes its default", g_settings.beacon_int, 1);
     check("a migrated record leaves the settings dirty", settings_dirty(), 1);
 
-    printf("\nv2 appended after v1\n");
+    printf("\nv2/v3 appended after v1\n");
     g_settings.invert = 1;
     g_settings.sentry_db = 25;
+    g_settings.sniff_rate = 2;
+    g_settings.sniff_bits = 1;
+    g_settings.beacon_type = 3;
+    g_settings.beacon_int = 2;
     check("save succeeds", settings_save(), 1);
     uint32_t magic;
     memcpy(&magic, settings_host_page(), 4);
     check("v1 record left in place", magic, SETTINGS_MAGIC);
     memcpy(&magic, settings_host_page() + end, 4);
-    check("v2 record appended right after it", magic, SETTINGS_MAGIC);
+    check("current record appended right after it", magic, SETTINGS_MAGIC);
     g_settings.contrast = 0;
     g_settings.invert = 0;
     settings_load();
-    check("newest record is the v2 one", settings_loaded_version(), SETTINGS_VERSION);
+    check("newest record is the current one", settings_loaded_version(), SETTINGS_VERSION);
     check_user_fields("after resave");
     check("new field survives the round trip", g_settings.invert, 1);
+    check("sniff_rate survives the round trip", g_settings.sniff_rate, 2);
+    check("sniff_bits survives the round trip", g_settings.sniff_bits, 1);
+    check("beacon_type survives the round trip", g_settings.beacon_type, 3);
+    check("beacon_int survives the round trip", g_settings.beacon_int, 2);
     check("sentry threshold survives the round trip", g_settings.sentry_db, 25);
     check("a current record is not dirty", settings_dirty(), 0);
 
     printf("\ncorrupted newest record\n");
-    // Flip a data byte of the v2 record: the CRC fails and the v1 one wins
+    // Flip a data byte of the current record: the CRC fails and the v1 one wins
     settings_host_page()[end + 8] ^= 0x01;
     settings_load();
     check("falls back to the older v1 record", settings_loaded_version(), 1);
