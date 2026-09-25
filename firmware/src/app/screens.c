@@ -16,6 +16,12 @@
     X(scr_identify)        \
     X(scr_ble)             \
     X(scr_ble_detail)      \
+    X(scr_ble_hunt)        \
+    X(act_ble_filter)      \
+    X(act_ble_sort)        \
+    X(act_ble_follow)      \
+    X(act_ble_spam)        \
+    X(act_ble_clear)       \
     X(scr_esb)             \
     X(scr_tx)              \
     X(scr_settings)        \

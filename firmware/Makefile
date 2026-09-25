@@ -59,7 +59,10 @@ SRC_FILES += \
   src/gfx/font3x5.c \
   src/gfx/font5x7.c \
   src/gfx/gfx.c \
+  src/radio/ble_adv.c \
+  src/radio/ble_devtab.c \
   src/radio/ble_scan.c \
+  src/radio/ble_sensor.c \
   src/radio/esb_scan.c \
   src/radio/scanner.c \
   src/radio/sweep_order.c \
