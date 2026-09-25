@@ -35,7 +35,7 @@ static void test_table(void)
 {
     printf("rc table\n");
 
-    check("five protocols", rc_proto_count(), 5);
+    check("eight protocols", rc_proto_count(), 8);
     check("bayang bind address A0", rc_proto_a0(0), 0x00);
     check("symax a0", rc_proto_a0(1), 0xAB);
     check("h8 a0", rc_proto_a0(3), 0xC4);
@@ -58,7 +58,33 @@ static void test_table(void)
     const uint8_t bayang[5] = {0, 0, 0, 0, 0};
     check("bayang bind by address", rc_proto_by_addr(bayang, 5), 0);
 
-    // An unknown family
+    // FlySky AFHDS2A: byte 1 = 0x05 distinguishes it from Bayang
+    const uint8_t flysky[5] = {0x00, 0x05, 0x05, 0x05, 0x05};
+    check("flysky by address", rc_proto_by_addr(flysky, 5), 5);
+    check("flysky by two bytes", rc_proto_by_addr(flysky, 2), 5);
+
+    // Bayang all-zero address still resolves to Bayang (not JJRC) from addr alone
+    check("bayang still wins on addr alone", rc_proto_by_addr(bayang, 5), 0);
+
+    // JJRC is detected by refine, not address
+    uint8_t jjrc_payload[15];
+    memset(jjrc_payload, 0, sizeof(jjrc_payload));
+    jjrc_payload[0] = 0x03; // hop channel index, < 0x10
+    check("jjrc refine from bayang", rc_proto_refine(0, jjrc_payload, 15), 6);
+
+    // Bayang payload (byte 0 = 0xA5) is not refined to JJRC
+    uint8_t bay_payload[15];
+    memset(bay_payload, 0, sizeof(bay_payload));
+    bay_payload[0] = 0xA5;
+    check("bayang not refined", rc_proto_refine(0, bay_payload, 15), 0);
+
+    // WLToys V911S detected from unknown proto + 8-byte payload with 0xDD marker
+    uint8_t wl_payload[8];
+    memset(wl_payload, 0, sizeof(wl_payload));
+    wl_payload[0] = 0xDD;
+    check("wltoys refine from unknown", rc_proto_refine(-1, wl_payload, 8), 7);
+
+    // An unknown family (wrong byte 1, not 0x05 for FlySky)
     const uint8_t unknown[5] = {0x55, 0x12, 0x34, 0x56, 0x78};
     check_true("unknown address", rc_proto_by_addr(unknown, 5) < 0);
 }
@@ -95,6 +121,31 @@ static void test_checksums(void)
     h[10] = 0x7F;
     h[19] = rc_proto_checksum(3, h, 20);
     check("h8 checksum", h[19], (uint8_t)(0x40 + 0x7F));
+
+    // FlySky: XOR over bytes 0..14 at byte 15
+    uint8_t f[16];
+    memset(f, 0, sizeof(f));
+    f[0] = 0xAA;
+    f[1] = 0xE8; f[2] = 0x03; // channel 1 = 1000
+    f[15] = rc_proto_checksum(5, f, 16);
+    uint8_t fxor = 0xAA ^ 0xE8 ^ 0x03;
+    check("flysky checksum", f[15], fxor);
+
+    // JJRC: additive over bytes 1..13 at byte 14 (byte 0 = hop idx, excluded)
+    uint8_t j[15];
+    memset(j, 0, sizeof(j));
+    j[0] = 0x02; // hop index, not summed
+    j[3] = 0x64; // partial throttle
+    j[14] = rc_proto_checksum(6, j, 15);
+    check("jjrc checksum", j[14], 0x64); // only byte 3 is non-zero in 1..13
+
+    // WLToys: additive over bytes 0..6
+    uint8_t w[8];
+    memset(w, 0, sizeof(w));
+    w[0] = 0xDD;
+    w[1] = 0x80; // mid throttle
+    w[7] = rc_proto_checksum(7, w, 8);
+    check("wltoys checksum", w[7], (uint8_t)(0xDD + 0x80));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,11 +159,19 @@ static void round_trip(rc_proto_t proto, uint8_t throttle, int8_t yaw, int8_t pi
     memset(p, 0, sizeof(p));
 
     // Set header-ish bytes so the frames look like real ones
-    if (proto == 0)
+    if (proto == 0) // BAYANG
     {
         p[0] = 0xA5;
         p[1] = 0xFA;
         p[13] = 0x0A;
+    }
+    else if (proto == 5) // FLYSKY: byte 0 must be 0xAA for data frames
+    {
+        p[0] = 0xAA;
+    }
+    else if (proto == 7) // WLTOYS: byte 0 must be 0xDD for data frames
+    {
+        p[0] = 0xDD;
     }
 
     rc_sticks_t in = {.throttle = throttle, .yaw = yaw, .pitch = pitch, .roll = roll};

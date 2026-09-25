@@ -78,6 +78,12 @@ uint8_t rc_a0_candidates(const uint8_t **out);
 typedef int8_t rc_proto_t;
 #define RC_PROTO_UNKNOWN (-1)
 
+// Disambiguate protocols that share an on-air address using the actual
+// payload. rc_proto_by_addr() returns the widest match (e.g. RC_BAYANG for
+// any {0x00,0x00,...} capture); call this with the first real payload to get
+// a narrower answer. Returns proto unchanged if no refinement is available.
+rc_proto_t rc_proto_refine(rc_proto_t proto, const uint8_t *payload, uint8_t len);
+
 // Byte-exact checksum of a payload per its protocol; also used to verify
 uint8_t rc_proto_checksum(rc_proto_t proto, const uint8_t *payload, uint8_t len);
 
