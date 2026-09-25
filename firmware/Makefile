@@ -172,6 +172,10 @@ test:
 		test/test_classify.c src/app/classify.c src/app/settings.c \
 		-o $(OUTPUT_DIRECTORY)/test_classify
 	@$(OUTPUT_DIRECTORY)/test_classify
+	$(CC_HOST) -std=c11 -Wall -Wextra -DSETTINGS_HOST_TEST -DFLASH_INT_PAGE_SIZE_HOST=4096 \
+		-Iconfig -Isrc/app test/test_settings.c src/app/settings.c \
+		-o $(OUTPUT_DIRECTORY)/test_settings
+	@$(OUTPUT_DIRECTORY)/test_settings
 	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
 		test/test_sweep_order.c src/radio/sweep_order.c \
 		-o $(OUTPUT_DIRECTORY)/test_sweep_order

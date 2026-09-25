@@ -5,21 +5,42 @@
 
 #ifndef SETTINGS_HOST_TEST
 #include "flash_int.h"
+#define PAGE_SIZE FLASH_INT_PAGE_SIZE
+#else
+#define PAGE_SIZE FLASH_INT_PAGE_SIZE_HOST
 #endif
 
 settings_data_t g_settings;
 static bool m_dirty;
+static uint16_t m_loaded_version;
 
+// Record header; the data follows it and the CRC follows the data. For the
+// current version this is exactly settings_record_t below.
 typedef struct
 {
     uint32_t magic;
     uint16_t version;
     uint16_t size;
+} record_header_t;
+
+typedef struct
+{
+    record_header_t hdr;
     settings_data_t data;
     uint32_t crc;
 } settings_record_t;
 
-#define RECORD_STRIDE ((sizeof(settings_record_t) + 3) & ~3u)
+#define HEADER_SIZE ((uint32_t)sizeof(record_header_t))
+#define RECORD_LEN(size) (HEADER_SIZE + (((uint32_t)(size) + 3u) & ~3u) + 4u)
+
+// Larger than any layout this firmware will ever have: a size beyond it is a
+// torn or foreign record, not a newer version
+#define DATA_SIZE_MAX 256
+
+_Static_assert(sizeof(settings_data_t) % 4 == 0, "settings data must be whole words");
+_Static_assert(sizeof(settings_record_t) == RECORD_LEN(sizeof(settings_data_t)),
+               "record layout must match the page walk");
+_Static_assert(SETTINGS_V1_SIZE <= sizeof(settings_data_t), "layouts only grow");
 
 uint32_t settings_crc32(const void *data, uint32_t len)
 {
@@ -51,104 +72,222 @@ void settings_defaults(void)
     g_settings.log_consent = 0;
     g_settings.shuffle = 1;
     g_settings.bat_cal = 1000;
+
+    // v2
+    g_settings.invert = 0;
+    g_settings.burnin = 1;
+    g_settings.saver_min = 0;
+    g_settings.sentry_db = 20;
+    g_settings.sentry_period = 5;
 }
 
-static bool record_valid(const settings_record_t *rec)
+// Values outside their range (a record from a buggy build, a bit flip that
+// kept the CRC valid is not a concern) fall back to the default of that field
+static void sanitize(void)
 {
-    if (rec->magic != SETTINGS_MAGIC || rec->version != SETTINGS_VERSION)
-        return false;
-    if (rec->size != sizeof(settings_data_t))
-        return false;
-
-    return rec->crc == settings_crc32(&rec->data, sizeof(rec->data));
+    settings_data_t *s = &g_settings;
+    if (s->contrast > 63)
+        s->contrast = 32;
+    if (s->band >= BAND_COUNT)
+        s->band = BAND_ISM;
+    if (s->dwell < 4 || s->dwell > SCAN_DWELL_SAMPLES_MAX)
+        s->dwell = SCAN_DWELL_SAMPLES_DEFAULT;
+    if (s->wf_decim < 1 || s->wf_decim > 32)
+        s->wf_decim = 2;
+    if (s->wf_mode >= WF_MODE_COUNT)
+        s->wf_mode = WF_DITHER;
+    if (s->bat_cal < 800 || s->bat_cal > 1200)
+        s->bat_cal = 1000;
+    if (s->saver_min > 60)
+        s->saver_min = 0;
+    if (s->sentry_db < 6 || s->sentry_db > 40)
+        s->sentry_db = 20;
+    if (s->sentry_period < 1 || s->sentry_period > 50)
+        s->sentry_period = 5;
 }
 
 bool settings_dirty(void) { return m_dirty; }
 void settings_mark_dirty(void) { m_dirty = true; }
+uint16_t settings_loaded_version(void) { return m_loaded_version; }
+
+// ---------------------------------------------------------------------------
+// Page access: the internal flash page on target, a RAM copy on the host
+// ---------------------------------------------------------------------------
 
 #ifndef SETTINGS_HOST_TEST
+
+static const uint8_t *page_base(void)
+{
+    return (const uint8_t *)SETTINGS_PAGE_ADDR;
+}
+
+static bool page_erase(void)
+{
+    return flash_int_erase_page(SETTINGS_PAGE_ADDR);
+}
+
+static bool page_write(uint32_t off, const void *data, uint32_t len)
+{
+    return flash_int_write(SETTINGS_PAGE_ADDR + off, data, len);
+}
+
+#else // SETTINGS_HOST_TEST: in-memory backing for the host test harness
+
+static uint8_t m_fake_page[PAGE_SIZE];
+
+uint8_t *settings_host_page(void)
+{
+    return m_fake_page;
+}
+
+static const uint8_t *page_base(void)
+{
+    return m_fake_page;
+}
+
+static bool page_erase(void)
+{
+    memset(m_fake_page, 0xFF, sizeof(m_fake_page));
+    return true;
+}
+
+// NOR flash only clears bits
+static bool page_write(uint32_t off, const void *data, uint32_t len)
+{
+    const uint8_t *src = (const uint8_t *)data;
+    for (uint32_t i = 0; i < len; i++)
+        m_fake_page[off + i] &= src[i];
+    return true;
+}
+
+#endif
+
+// ---------------------------------------------------------------------------
+// Page walk
+// ---------------------------------------------------------------------------
+
+typedef enum
+{
+    WALK_RECORD, // a well formed record at off, next one at off + len
+    WALK_ERASED, // erased tail: nothing beyond this point, free space
+    WALK_BROKEN, // torn or foreign data: the rest of the page is unusable
+} walk_t;
+
+static walk_t walk_at(const uint8_t *page, uint32_t off, uint32_t *len)
+{
+    if (off + HEADER_SIZE + 4 > PAGE_SIZE)
+        return WALK_BROKEN; // no room for even an empty record: page full
+
+    record_header_t hdr;
+    memcpy(&hdr, page + off, sizeof(hdr));
+
+    if (hdr.magic == 0xFFFFFFFF)
+        return WALK_ERASED;
+    if (hdr.magic != SETTINGS_MAGIC || hdr.size == 0 || hdr.size > DATA_SIZE_MAX)
+        return WALK_BROKEN;
+
+    *len = RECORD_LEN(hdr.size);
+    if (off + *len > PAGE_SIZE)
+        return WALK_BROKEN;
+    return WALK_RECORD;
+}
+
+// A record this firmware can use: CRC intact and a layout that is a prefix
+// of settings_data_t, or the current one extended by a newer firmware (the
+// layout only grows, so its first bytes are still ours)
+static bool record_usable(const uint8_t *rec, uint16_t *version)
+{
+    record_header_t hdr;
+    memcpy(&hdr, rec, sizeof(hdr));
+
+    uint32_t crc;
+    memcpy(&crc, rec + HEADER_SIZE + ((hdr.size + 3u) & ~3u), sizeof(crc));
+    if (crc != settings_crc32(rec + HEADER_SIZE, hdr.size))
+        return false;
+
+    bool ok;
+    if (hdr.version == 1)
+        ok = (hdr.size == SETTINGS_V1_SIZE);
+    else if (hdr.version == SETTINGS_VERSION)
+        ok = (hdr.size == sizeof(settings_data_t));
+    else
+        ok = (hdr.version > SETTINGS_VERSION && hdr.size >= sizeof(settings_data_t));
+
+    *version = hdr.version;
+    return ok;
+}
 
 void settings_load(void)
 {
     settings_defaults();
+    m_loaded_version = 0;
 
-    const uint8_t *page = (const uint8_t *)SETTINGS_PAGE_ADDR;
-    const settings_record_t *newest = 0;
+    const uint8_t *page = page_base();
+    const uint8_t *newest = 0;
+    uint16_t newest_version = 0;
+    uint32_t off = 0;
+    uint32_t len;
 
-    for (uint32_t off = 0; off + RECORD_STRIDE <= FLASH_INT_PAGE_SIZE; off += RECORD_STRIDE)
+    // The most recent usable record wins, whatever its version
+    while (walk_at(page, off, &len) == WALK_RECORD)
     {
-        const settings_record_t *rec = (const settings_record_t *)(page + off);
-        if (rec->magic == 0xFFFFFFFF)
-            break; // erased tail, nothing beyond this point
-        if (record_valid(rec))
-            newest = rec;
+        uint16_t version;
+        if (record_usable(page + off, &version))
+        {
+            newest = page + off;
+            newest_version = version;
+        }
+        off += len;
     }
 
-    if (newest)
-        memcpy(&g_settings, &newest->data, sizeof(g_settings));
-
     m_dirty = false;
+    if (!newest)
+        return;
+
+    record_header_t hdr;
+    memcpy(&hdr, newest, sizeof(hdr));
+
+    // Migration: an older layout is a prefix of the current one, the fields
+    // it does not have keep their defaults
+    uint32_t n = hdr.size < sizeof(g_settings) ? hdr.size : sizeof(g_settings);
+    memcpy(&g_settings, newest + HEADER_SIZE, n);
+    sanitize();
+
+    m_loaded_version = newest_version;
+    if (newest_version != SETTINGS_VERSION)
+        m_dirty = true; // rewritten in the current format by the next save
 }
 
 bool settings_save(void)
 {
     settings_record_t rec;
     memset(&rec, 0, sizeof(rec));
-    rec.magic = SETTINGS_MAGIC;
-    rec.version = SETTINGS_VERSION;
-    rec.size = sizeof(settings_data_t);
+    rec.hdr.magic = SETTINGS_MAGIC;
+    rec.hdr.version = SETTINGS_VERSION;
+    rec.hdr.size = sizeof(settings_data_t);
     memcpy(&rec.data, &g_settings, sizeof(rec.data));
     rec.crc = settings_crc32(&rec.data, sizeof(rec.data));
 
-    const uint8_t *page = (const uint8_t *)SETTINGS_PAGE_ADDR;
+    // Append after the last record. A full page, or one whose tail cannot be
+    // walked (a torn write), is erased first: the record written next holds
+    // everything, so nothing is lost but the history.
+    const uint8_t *page = page_base();
     uint32_t off = 0;
-    while (off + RECORD_STRIDE <= FLASH_INT_PAGE_SIZE)
-    {
-        const settings_record_t *slot = (const settings_record_t *)(page + off);
-        if (slot->magic == 0xFFFFFFFF)
-            break;
-        off += RECORD_STRIDE;
-    }
+    uint32_t len;
+    walk_t w;
+    while ((w = walk_at(page, off, &len)) == WALK_RECORD)
+        off += len;
 
-    if (off + RECORD_STRIDE > FLASH_INT_PAGE_SIZE)
+    if (w != WALK_ERASED || off + sizeof(rec) > PAGE_SIZE)
     {
-        if (!flash_int_erase_page(SETTINGS_PAGE_ADDR))
+        if (!page_erase())
             return false;
         off = 0;
     }
 
-    if (!flash_int_write(SETTINGS_PAGE_ADDR + off, &rec, sizeof(rec)))
+    if (!page_write(off, &rec, sizeof(rec)))
         return false;
 
     m_dirty = false;
     return true;
 }
-
-#else // SETTINGS_HOST_TEST: in-memory backing for the host test harness
-
-static uint8_t m_fake_page[FLASH_INT_PAGE_SIZE_HOST];
-
-void settings_load(void)
-{
-    settings_defaults();
-    const settings_record_t *rec = (const settings_record_t *)m_fake_page;
-    if (record_valid(rec))
-        memcpy(&g_settings, &rec->data, sizeof(g_settings));
-    m_dirty = false;
-}
-
-bool settings_save(void)
-{
-    settings_record_t rec;
-    memset(&rec, 0, sizeof(rec));
-    rec.magic = SETTINGS_MAGIC;
-    rec.version = SETTINGS_VERSION;
-    rec.size = sizeof(settings_data_t);
-    memcpy(&rec.data, &g_settings, sizeof(rec.data));
-    rec.crc = settings_crc32(&rec.data, sizeof(rec.data));
-    memcpy(m_fake_page, &rec, sizeof(rec));
-    m_dirty = false;
-    return true;
-}
-
-#endif
