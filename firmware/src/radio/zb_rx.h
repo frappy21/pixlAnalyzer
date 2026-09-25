@@ -133,6 +133,8 @@ enum
     ZB_PAN_EXT_PAN = 1 << 4,  // ext_pan is valid
     ZB_PAN_COORD = 1 << 5,    // beacon from the PAN coordinator
     ZB_PAN_MORE = 1 << 6,     // more addresses than the lists hold
+    // Thread hint: beacon with proto_id 3 (Thread 1.x), or PAN ID 0xFACE
+    ZB_PAN_THREAD = 1 << 7,
 };
 
 typedef struct

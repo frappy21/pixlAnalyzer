@@ -70,13 +70,27 @@ static int activity_height(const zb_chan_t *c, int max_h)
 
 static const char *proto_tag(const zb_pan_t *p)
 {
+    if (p->flags & ZB_PAN_THREAD)
+        return "TH";
     if (!(p->flags & ZB_PAN_BEACON))
         return "";
     if (p->flags & ZB_PAN_ZIGBEE)
         return "ZB";
-    if (p->proto_id == 3)
-        return "TH";
     return "BC";
+}
+
+// True when any known PAN on this channel has a Thread hint
+static bool chan_is_thread(uint8_t ch)
+{
+    uint8_t idx[ZB_MAX_PANS];
+    uint8_t n = zb_rx_sorted(idx, ZB_MAX_PANS);
+    for (uint8_t i = 0; i < n; i++)
+    {
+        const zb_pan_t *p = zb_rx_pan(idx[i]);
+        if (p->ch == ch && (p->flags & ZB_PAN_THREAD))
+            return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +142,9 @@ void ui_zigbee_main(uint8_t lock)
         gfx_text_micro(x + 1, LABEL_Y, buf);
         if (ch == lock)
             gfx_invert(x, LABEL_Y - 1, 8, 7);
+        // Small 2-pixel dot in the gap above the bar for Thread channels
+        if (chan_is_thread(ch))
+            gfx_box(x + 3, BAR_TOP - 1, 2, 1, true, false);
     }
     gfx_hline(0, DISP_W - 1, LIST_Y - 2);
 
@@ -232,7 +249,16 @@ uint8_t ui_zigbee_pan(const zb_pan_t *p, uint8_t pos, uint8_t n, uint8_t page)
     gfx_text_micro(x, 18, gfx_fmt_int(buf, p->last_seq));
 
     // What the beacons said: the Zigbee payload, never anything encrypted
-    if (p->flags & ZB_PAN_ZIGBEE)
+    if (p->flags & ZB_PAN_THREAD)
+    {
+        x = gfx_text_micro_width("THREAD") + 2;
+        gfx_text_micro(2, 25, "THREAD");
+        if (p->flags & ZB_PAN_BEACON)
+            gfx_text_micro(2 + x, 25, (p->flags & ZB_PAN_PJ) ? "JOIN OPEN" : "JOIN CLOSED");
+        else
+            gfx_text_micro(2 + x, 25, "PAN:FACE");
+    }
+    else if (p->flags & ZB_PAN_ZIGBEE)
     {
         const char *stack = p->stack_profile == 2   ? "ZIGBEE PRO"
                             : p->stack_profile == 1 ? "ZIGBEE 2006"
@@ -244,9 +270,7 @@ uint8_t ui_zigbee_pan(const zb_pan_t *p, uint8_t pos, uint8_t n, uint8_t page)
     else if (p->flags & ZB_PAN_BEACON)
     {
         x = micro_pair(2, 25, "BEACON PROTO", p->proto_id);
-        if (p->proto_id == 3)
-            gfx_text_micro(x, 25, "THREAD");
-        else if (p->flags & ZB_PAN_PJ)
+        if (p->flags & ZB_PAN_PJ)
             gfx_text_micro(x, 25, "ASSOC OK");
     }
     else

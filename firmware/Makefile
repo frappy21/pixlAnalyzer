@@ -94,6 +94,8 @@ SRC_FILES += \
   src/radio/unifying.c \
   src/radio/tx_test.c \
   src/radio/zb_rx.c \
+  src/radio/ant_rx.c \
+  src/app/scr_ant.c \
 
 # Application headers
 INC_FOLDERS += \
@@ -253,6 +255,9 @@ test:
 	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio \
 		test/test_unify.c src/radio/unifying.c -o $(OUTPUT_DIRECTORY)/test_unify
 	@$(OUTPUT_DIRECTORY)/test_unify
+	$(CC_HOST) -std=c11 -Wall -Wextra -Isrc/radio -DANT_RX_HOST_TEST \
+		test/test_ant.c src/radio/ant_rx.c -o $(OUTPUT_DIRECTORY)/test_ant
+	@$(OUTPUT_DIRECTORY)/test_ant
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc

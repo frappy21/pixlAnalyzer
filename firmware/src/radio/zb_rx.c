@@ -460,6 +460,11 @@ static void account_pan(const zb_mac_t *m, uint8_t ch, uint8_t rssi, uint32_t no
             p->flags |= ZB_PAN_EXT_PAN;
         }
     }
+
+    // Thread hint: beacon with proto_id 3 (Thread 1.x), or PAN ID 0xFACE
+    if ((m->beacon && m->beacon_payload && m->proto_id == 3) ||
+        (m->has_pan && m->pan == 0xFACE))
+        p->flags |= ZB_PAN_THREAD;
 }
 
 static void bump16(uint16_t *v)

@@ -32,6 +32,7 @@
     X(act_ble_spam)        \
     X(act_ble_clear)       \
     X(scr_esb)             \
+    X(scr_ant)             \
     X(scr_zigbee)          \
     X(scr_zigbee_pan)      \
     X(scr_sniff)           \
@@ -64,6 +65,7 @@
     X(scr_ble, "BLE")                \
     X(scr_zigbee, "ZIGBEE")          \
     X(scr_esb, "RC SNIFF")           \
+    X(scr_ant, "ANT+")               \
     X(scr_sniff, "SNIFF")            \
     /* RC and drones */              \
     X(scr_rc, "RC DASH")             \
