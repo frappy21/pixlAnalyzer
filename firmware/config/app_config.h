@@ -44,7 +44,9 @@
 #define NOISE_FLOOR_INIT 92
 #define NOISE_FLOOR_MIN 60
 #define NOISE_FLOOR_MAX 110
-#define SIGNAL_MARGIN_DB 4    // dB above the floor before a channel counts as busy
+#define SIGNAL_MARGIN_DB 7    // dB above the floor before a channel counts as busy.
+                              // Measured: pure noise peaks up to 6 dB (p90) above
+                              // the tracked floor over a 32 sample visit
 #define SPECTRUM_RANGE_DB 40  // dB mapped onto SPECTRUM_H pixels
 #define DB_PER_GRID 10
 
