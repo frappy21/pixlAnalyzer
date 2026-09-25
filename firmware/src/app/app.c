@@ -1,15 +1,25 @@
 #include "app.h"
 
+#include "board_config.h"
 #include "buttons.h"
 #include "display.h"
+#include "gfx.h"
+#include "screens.h"
 #include "settings.h"
 #include "systime.h"
 
 uint8_t g_app_arena[APP_ARENA_SIZE] __attribute__((aligned(4)));
 
+// How long the name of a main screen stays up after switching to it
+#define BANNER_MS 700
+
 static const app_screen_t *m_stack[APP_STACK_DEPTH];
 static uint8_t m_depth;
 static bool m_redraw = true;
+static uint8_t m_home; // index into g_app_home
+
+static const char *m_banner;
+static uint32_t m_banner_until;
 
 static uint32_t m_boot_ms;
 static uint32_t m_last_input_ms;
@@ -36,16 +46,95 @@ static void pop(void)
     m_depth--;
 }
 
-void app_init(const app_screen_t *home)
+void app_init(void)
 {
+    const app_screen_t *home = g_app_home[0];
+
     m_boot_ms = systime_ms();
     m_last_input_ms = m_boot_ms;
 
+    m_home = 0;
     m_stack[0] = home;
     m_depth = 1;
     m_redraw = true;
     if (home->enter)
         home->enter();
+}
+
+// ---------------------------------------------------------------------------
+// Carousel
+// ---------------------------------------------------------------------------
+
+static int home_index(const app_screen_t *screen)
+{
+    for (uint8_t i = 0; i < g_app_home_count; i++)
+    {
+        if (g_app_home[i] == screen)
+            return i;
+    }
+    return -1;
+}
+
+bool app_is_main(const app_screen_t *screen)
+{
+    return home_index(screen) >= 0;
+}
+
+// Name of the new main screen in a framed box in the middle, drawn by every
+// flush while it is up
+static void banner_draw(void)
+{
+    int w = gfx_text_width(m_banner) + 8;
+    int x = (DISP_W - w) / 2;
+    gfx_box(x, 22, w, 13, true, false);
+    gfx_box(x, 22, w, 13, false, true);
+    gfx_text(x + 4, 25, m_banner);
+}
+
+static void home_set(uint8_t index)
+{
+    while (m_depth > 1)
+        pop();
+
+    if (index != m_home)
+    {
+        const app_screen_t *old = m_stack[0];
+        if (old->leave)
+            old->leave();
+
+        m_home = index;
+        m_stack[0] = g_app_home[index];
+        if (m_stack[0]->enter)
+            m_stack[0]->enter();
+    }
+
+    m_banner = g_app_home_label[index];
+    m_banner_until = systime_ms() + BANNER_MS;
+    display_set_overlay(banner_draw);
+    transition();
+}
+
+void app_home_switch(int direction)
+{
+    uint8_t n = g_app_home_count;
+    home_set((uint8_t)((m_home + n + (direction < 0 ? -1 : 1)) % n));
+}
+
+void app_home_select(const app_screen_t *screen)
+{
+    int i = home_index(screen);
+    if (i >= 0)
+        home_set((uint8_t)i);
+}
+
+void app_banner_update(uint32_t now)
+{
+    if (m_banner && (int32_t)(now - m_banner_until) >= 0)
+    {
+        m_banner = 0;
+        display_set_overlay(0);
+        m_redraw = true;
+    }
 }
 
 const app_screen_t *app_current(void)
@@ -62,6 +151,12 @@ void app_open(const app_screen_t *screen)
 {
     if (!screen || !screen->tick)
         return;
+
+    if (app_is_main(screen))
+    {
+        app_home_select(screen);
+        return;
+    }
 
     if (m_depth >= APP_STACK_DEPTH)
         pop();
@@ -132,6 +227,10 @@ bool app_left(void)
 
 bool app_right(void)
 {
+    // A long RIGHT on a main screen switches screens, so there it is a click
+    // on release, like LEFT
+    if (app_at_home())
+        return noted(buttons_clicked(BTN_RIGHT));
     return noted(buttons_repeat(BTN_RIGHT));
 }
 

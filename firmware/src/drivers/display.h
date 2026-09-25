@@ -25,6 +25,11 @@ void display_clear(void);
 void display_flush(void);
 void display_flush_all(void); // ignore the dirty page tracking
 
+// Drawn into the frame buffer by every flush, on top of whatever the screen
+// drew (a short lived banner). NULL removes it. Screens redraw the whole
+// frame, so the next frame after removal no longer has it.
+void display_set_overlay(void (*draw)(void));
+
 // 0..63 on both panels, mapped onto the controller's own contrast range
 void display_set_contrast(uint8_t value);
 

@@ -172,16 +172,35 @@ int main(void)
 
     power_watchdog_start();
 
-    app_init(&scr_scanner);
+    app_init();
 
     while (1)
     {
         buttons_poll();
         uint32_t now = systime_ms();
 
-        // Global back: a long LEFT closes whatever is open. The home screen
-        // keeps LEFT for itself (marker, zoom, scroll with auto repeat).
-        if (!app_at_home() && buttons_long(BTN_LEFT))
+        // Global long presses. On a main screen: long LEFT/RIGHT switch to
+        // the previous/next main screen, long MID opens the menu. Anywhere
+        // else a long LEFT closes whatever is open.
+        if (app_at_home())
+        {
+            if (buttons_long(BTN_LEFT))
+            {
+                app_note_input();
+                app_home_switch(-1);
+            }
+            else if (buttons_long(BTN_RIGHT))
+            {
+                app_note_input();
+                app_home_switch(1);
+            }
+            else if (buttons_long(BTN_MID))
+            {
+                app_note_input();
+                app_open(&scr_menu);
+            }
+        }
+        else if (buttons_long(BTN_LEFT))
         {
             app_note_input();
             app_back();
@@ -190,6 +209,7 @@ int main(void)
         const app_screen_t *screen = app_current();
         screen->tick(now);
 
+        app_banner_update(now);
         housekeeping(now);
 
         // Screens that are not sweeping have nothing to do until a button

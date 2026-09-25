@@ -194,8 +194,18 @@ static void flush_page(uint8_t page)
     lcd_data(&g_frame_buffer[page * DISP_W], DISP_W);
 }
 
+static void (*m_overlay)(void);
+
+void display_set_overlay(void (*draw)(void))
+{
+    m_overlay = draw;
+}
+
 void display_flush(void)
 {
+    if (m_overlay)
+        m_overlay();
+
     for (uint8_t page = 0; page < DISP_PAGES; page++)
     {
         const uint8_t *src = &g_frame_buffer[page * DISP_W];

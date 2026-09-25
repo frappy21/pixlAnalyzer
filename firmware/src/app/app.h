@@ -12,9 +12,14 @@
  * Every entry is listed once in screens.c, which is also where the menu gets
  * its rows from.
  *
- * Global back: on any screen but the home one, a long LEFT press pops the
- * screen (main loop). A short LEFT click is the screen's own, read with
- * app_left(). The home screen keeps LEFT for itself.
+ * Main screens: the bottom of the stack is one of the main screens (Spectrum,
+ * WiFi, BLE, RC, listed in APP_HOME_LIST in screens.c), the carousel. On a
+ * main screen the long presses are global (main loop): long LEFT/RIGHT switch
+ * to the previous/next main screen, long MID opens the menu. Short clicks
+ * belong to the screen, without auto repeat there.
+ *
+ * Global back: on any other screen, a long LEFT press pops the screen (main
+ * loop). A short LEFT click is the screen's own, read with app_left().
  */
 #ifndef PIXLA_APP_H
 #define PIXLA_APP_H
@@ -55,9 +60,10 @@ typedef struct app_screen
 
 #define APP_STACK_DEPTH 6
 
-// Installs the home screen (bottom of the stack, never popped) and calls its
-// enter(). Also starts the uptime and inactivity clocks.
-void app_init(const app_screen_t *home);
+// Installs the first main screen as the home screen (bottom of the stack,
+// never popped) and calls its enter(). Also starts the uptime and inactivity
+// clocks. The main screens come from screens.c.
+void app_init(void);
 
 const app_screen_t *app_current(void);
 bool app_at_home(void);
@@ -65,7 +71,17 @@ bool app_at_home(void);
 // Push a screen and call its enter(). The screen below stays on the stack
 // without a leave() and gets no ticks until it is on top again. A full stack
 // replaces the top screen instead (leave() is called on it).
+// A main screen is never pushed: opening one selects it as the home screen.
 void app_open(const app_screen_t *screen);
+
+// Carousel. Both pop everything above the home screen, leave() the old home,
+// enter() the new one and show its name for a moment.
+void app_home_switch(int direction); // +1 next, -1 previous, wraps around
+void app_home_select(const app_screen_t *screen);
+bool app_is_main(const app_screen_t *screen);
+
+// Called by the main loop after the tick: expires the name banner
+void app_banner_update(uint32_t now);
 
 // Call leave() on the top screen and pop it. The screen revealed below is not
 // re-entered, it only gets a redraw. Does nothing on the home screen.
@@ -92,7 +108,7 @@ bool app_take_redraw(void);
 // ---------------------------------------------------------------------------
 
 bool app_left(void);    // LEFT click, on release. Never fires for a long hold (that is back).
-bool app_right(void);   // RIGHT press with auto repeat
+bool app_right(void);   // RIGHT press with auto repeat; a click on a main screen (long is global)
 bool app_ok(void);      // MID click, on release
 bool app_ok_long(void); // MID long press, fires once while held
 

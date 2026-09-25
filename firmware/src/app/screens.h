@@ -15,8 +15,13 @@
 extern const app_screen_t *const g_app_screens[];
 extern const uint8_t g_app_screen_count;
 
+// Main screens (the carousel) and their names, APP_HOME_LIST in screens.c
+extern const app_screen_t *const g_app_home[];
+extern const char *const g_app_home_label[];
+extern const uint8_t g_app_home_count;
+
 // Opened by name from main.c and the menu
-extern const app_screen_t scr_scanner; // home
+extern const app_screen_t scr_scanner; // Spectrum, the first main screen
 extern const app_screen_t scr_menu;    // top level menu
 extern const app_screen_t scr_group;   // submenu of one group
 

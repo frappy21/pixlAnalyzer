@@ -165,12 +165,10 @@ static void scanner_tick(uint32_t now)
             app_redraw();
     }
 
-    // The home screen is the one place where LEFT repeats: there is no
-    // global back to share it with here
-    if (buttons_repeat(BTN_LEFT))
+    // Clicks only: the long presses switch screens and open the menu
+    if (app_left())
     {
         tool_adjust(-1);
-        app_note_input();
         app_redraw();
     }
     if (app_right())
@@ -179,9 +177,8 @@ static void scanner_tick(uint32_t now)
         app_redraw();
     }
 
-    // A long press cycles the tool, a short click (seen on release) opens
-    // the menu
-    if (app_ok_long())
+    // A click cycles the tool
+    if (app_ok())
     {
         m_view.tool = (uint8_t)((m_view.tool + 1) % TOOL_COUNT);
         if (m_view.tool != TOOL_SCROLL)
@@ -190,11 +187,6 @@ static void scanner_tick(uint32_t now)
             m_view.frozen = false;
         }
         app_redraw();
-    }
-    else if (app_ok())
-    {
-        app_open(&scr_menu);
-        return;
     }
 
     if (app_take_redraw())
@@ -210,8 +202,8 @@ static void scanner_tick(uint32_t now)
 }
 
 const app_screen_t scr_scanner = {
-    .name = "Scanner",
-    .group = APP_GROUP_HIDDEN,
+    .name = "Spectrum",
+    .group = APP_GROUP_SPECTRUM,
     .enter = scanner_enter,
     .tick = scanner_tick,
     .busy = true,
@@ -240,7 +232,7 @@ static void top_tick(uint32_t now)
 }
 
 const app_screen_t scr_top = {
-    .name = "Busiest",
+    .name = "WiFi",
     .group = APP_GROUP_SPECTRUM,
     .tick = top_tick,
     .busy = true,
@@ -369,7 +361,7 @@ const app_screen_t act_set_ref = {
 static void clear_max_action(void)
 {
     spectrum_clear_max();
-    app_home(); // straight back to the scanner to watch it build up again
+    app_open(&scr_scanner); // straight to Spectrum to watch it build up again
 }
 
 const app_screen_t act_clear_max = {
