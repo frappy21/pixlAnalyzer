@@ -89,6 +89,19 @@ static uint8_t m_trend_len;
 
 static const uint16_t ble_adv_mhz[3] = {2402, 2426, 2480};
 
+// The scanner sweeps far faster than the display can usefully show, so frames
+// are capped at ~30 per second. Button actions still redraw at once.
+#define SCANNER_FRAME_MS 33
+
+// BLE and ShockBurst scans are run in short slices, one per main loop pass,
+// so the buttons are polled often enough to debounce a normal click. The
+// screen is updated after the same amount of listening as before.
+#define BLE_SLICE_MS 30    // 10ms on each advertising channel
+#define BLE_UPDATE_MS 300  // listening time between two list updates
+#define ESB_DWELL_MS 30    // per MHz: 15ms at 2Mbit + 7.5ms at 1Mbit
+#define ESB_SLICE_MHZ 1
+#define ESB_UPDATE_MHZ 10
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -97,6 +110,10 @@ static void enter(app_state_t state)
 {
     m_state = state;
     m_redraw = true;
+
+    // Whatever is still held belongs to the screen we are leaving: the new
+    // one only sees buttons pressed after they have been released
+    buttons_flush();
 }
 
 static uint16_t marker_mhz(void)
@@ -234,6 +251,8 @@ static void tool_adjust(int direction)
 
 static void state_scanner(uint32_t now)
 {
+    static uint32_t last_draw_ms;
+
     if (!m_view.frozen)
     {
         scanner_sweep();
@@ -246,7 +265,8 @@ static void state_scanner(uint32_t now)
             m_sweep_count = 0;
             m_sweep_window_ms = now;
         }
-        m_redraw = true;
+        if (systime_ms() - last_draw_ms >= SCANNER_FRAME_MS)
+            m_redraw = true;
     }
 
     if (buttons_repeat(BTN_LEFT))
@@ -262,8 +282,9 @@ static void state_scanner(uint32_t now)
         m_redraw = true;
     }
 
-    // A long press cycles the tool, a short one opens the menu
-    if (buttons_down(BTN_MID) && buttons_held_ms(BTN_MID) > 600)
+    // A long press cycles the tool, a short click (seen on release) opens
+    // the menu
+    if (buttons_long(BTN_MID))
     {
         m_view.tool = (uint8_t)((m_view.tool + 1) % TOOL_COUNT);
         if (m_view.tool != TOOL_SCROLL)
@@ -271,11 +292,10 @@ static void state_scanner(uint32_t now)
             m_view.scroll_back = 0;
             m_view.frozen = false;
         }
-        buttons_flush();
         note_input();
         m_redraw = true;
     }
-    else if (buttons_pressed(BTN_MID))
+    else if (buttons_clicked(BTN_MID))
     {
         note_input();
         m_menu_sel = 0;
@@ -286,7 +306,13 @@ static void state_scanner(uint32_t now)
     if (m_redraw)
     {
         ui_scanner(&m_view);
+        last_draw_ms = systime_ms();
         m_redraw = false;
+    }
+    else if (m_view.frozen)
+    {
+        // Scrolled back and nothing changed: no sweep runs, so do not spin
+        systime_idle(20);
     }
 }
 
@@ -760,14 +786,28 @@ static void run_identify(void)
     // Four 250ms windows so the progress bar moves and the watchdog is fed
     park_stats_t acc;
     memset(&acc, 0, sizeof(acc));
+    acc.floor_rssi = RSSI_INVALID; // "nothing measured", not 0dBm
+    acc.peak_rssi = RSSI_INVALID;
+
+    const uint16_t capacity = (uint16_t)(sizeof(m_bursts) / sizeof(m_bursts[0]));
 
     for (int i = 0; i < 4; i++)
     {
+        // A full buffer makes scanner_park return at once with no window
+        if (total >= capacity)
+            break;
+
         ui_identify_progress(mhz, (uint8_t)(i * 25));
         memset(&stats, 0, sizeof(stats)); // a failed window must not add stale numbers
-        uint16_t n = scanner_park(mhz, 250, &m_bursts[total],
-                                  (uint16_t)(sizeof(m_bursts) / sizeof(m_bursts[0]) - total),
+        uint16_t n = scanner_park(mhz, 250, &m_bursts[total], (uint16_t)(capacity - total),
                                   &stats);
+        power_watchdog_feed();
+
+        // No window means nothing was measured: merging the zeroed stats
+        // would turn floor and peak into 0dBm
+        if (stats.window_us == 0)
+            continue;
+
         // Burst timestamps restart with every window, so shift them
         for (uint16_t k = 0; k < n; k++)
             m_bursts[total + k].start_us += (uint32_t)i * 250000u;
@@ -778,10 +818,8 @@ static void run_identify(void)
         acc.bursts = (uint16_t)(acc.bursts + stats.bursts);
         acc.dropped = (uint16_t)(acc.dropped + stats.dropped);
         acc.floor_rssi = stats.floor_rssi;
-        if (stats.peak_rssi < acc.peak_rssi || i == 0)
+        if (stats.peak_rssi < acc.peak_rssi)
             acc.peak_rssi = stats.peak_rssi;
-
-        power_watchdog_feed();
     }
 
     classify_run(mhz, m_bursts, total, &acc, &m_verdict);
@@ -824,14 +862,15 @@ static void state_identify(void)
 // BLE
 // ---------------------------------------------------------------------------
 
-static void state_ble(uint32_t now)
+static void state_ble(void)
 {
-    static uint32_t last_scan;
+    static uint32_t listened_ms;
 
-    if (now - last_scan > 200)
+    ble_scan_run(BLE_SLICE_MS);
+    listened_ms += BLE_SLICE_MS;
+    if (listened_ms >= BLE_UPDATE_MS)
     {
-        ble_scan_run(300);
-        last_scan = now;
+        listened_ms = 0;
         m_redraw = true;
     }
 
@@ -895,6 +934,7 @@ static void state_esb(void)
 {
     // One pass over the band the cheap radios use, in slices so the UI stays alive
     static uint16_t next_mhz = 2400;
+    static uint8_t since_draw_mhz;
 
     if (m_redraw)
     {
@@ -902,13 +942,18 @@ static void state_esb(void)
         m_redraw = false;
     }
 
-    uint16_t end = next_mhz + 9;
+    uint16_t end = next_mhz + ESB_SLICE_MHZ - 1;
     if (end > 2483)
         end = 2483;
 
-    esb_scan_run(next_mhz, end, 30);
+    esb_scan_run(next_mhz, end, ESB_DWELL_MS);
+    since_draw_mhz = (uint8_t)(since_draw_mhz + (end - next_mhz + 1));
     next_mhz = (end >= 2483) ? 2400 : (uint16_t)(end + 1);
-    m_redraw = true;
+    if (since_draw_mhz >= ESB_UPDATE_MHZ || next_mhz == 2400)
+    {
+        since_draw_mhz = 0;
+        m_redraw = true;
+    }
 
     if (any_button_event())
     {
@@ -937,10 +982,10 @@ static void state_tx_confirm(void)
         m_redraw = true;
     }
 
-    // Deliberate hold, so a stray press can never put a carrier on the air
+    // Deliberate hold, so a stray press can never put a carrier on the air.
+    // A press still held from the menu does not count: enter() ignores it.
     if (buttons_down(BTN_MID) && buttons_held_ms(BTN_MID) > 1000)
     {
-        buttons_flush();
         note_input();
         if (tx_test_start(m_tx_mhz, m_tx_power))
         {
@@ -951,8 +996,8 @@ static void state_tx_confirm(void)
         enter(ST_MENU);
         return;
     }
-    // A short press means "no thanks"
-    if (buttons_pressed(BTN_MID))
+    // A short click means "no thanks"
+    if (buttons_clicked(BTN_MID))
     {
         note_input();
         enter(ST_MENU);
@@ -1138,7 +1183,7 @@ int main(void)
             state_identify();
             break;
         case ST_BLE:
-            state_ble(now);
+            state_ble();
             break;
         case ST_BLE_DETAIL:
             state_ble_detail();
@@ -1159,7 +1204,7 @@ int main(void)
         // Screens that are not sweeping have nothing to do until a button
         // moves, so sleep the core instead of spinning at 64MHz
         if (m_state != ST_SCANNER && m_state != ST_METER && m_state != ST_TOP &&
-            m_state != ST_ESB && m_state != ST_IDENTIFY)
+            m_state != ST_BLE && m_state != ST_ESB && m_state != ST_IDENTIFY)
         {
             systime_idle(20);
         }
