@@ -3,8 +3,7 @@
  * the same sweep: Busiest, Meter, Overlay, Freeze, Set ref, Clear max, View,
  * Trace, RBW, Delta mkr, Cal offset, Alarm, Adapt dwell.
  *
- * The options set from here are session only (static variables, defaults
- * after every boot); nothing new goes into the settings record.
+ * The options set from here persist to settings v5 (sp_* fields).
  */
 #include <string.h>
 
@@ -89,6 +88,20 @@ void scr_scanner_apply_band(void)
         break;
     }
     spectrum_reset();
+}
+
+void scr_scanner_load_options(void)
+{
+    spectrum_set_trace(g_settings.sp_trace);
+    spectrum_set_rbw(g_settings.sp_rbw);
+    spectrum_set_cal(g_settings.sp_cal);
+    scanner_set_adaptive(g_settings.sp_adaptive != 0);
+    m_view.layout = g_settings.sp_view < LAYOUT_COUNT ? g_settings.sp_view : LAYOUT_SPLIT;
+    uint8_t i;
+    for (i = 0; i < sizeof(alarm_levels); i++)
+        if (alarm_levels[i] == g_settings.sp_alarm_db)
+            break;
+    m_alarm_sel = i < sizeof(alarm_levels) ? i : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +486,9 @@ static void view_action(void)
     uint8_t shown = ui_scanner_waterfall_rows(m_view.layout);
     if (shown && rows > shown && m_view.scroll_back > rows - shown)
         m_view.scroll_back = rows - shown;
+
+    g_settings.sp_view = m_view.layout;
+    settings_mark_dirty();
 }
 
 static const char *view_value(void)
@@ -490,6 +506,8 @@ const app_screen_t act_view = {
 static void trace_action(void)
 {
     spectrum_set_trace((uint8_t)((spectrum_trace() + 1) % TRACE_COUNT));
+    g_settings.sp_trace = spectrum_trace();
+    settings_mark_dirty();
 }
 
 static const char *trace_value(void)
@@ -507,6 +525,8 @@ const app_screen_t act_trace = {
 static void rbw_action(void)
 {
     spectrum_set_rbw(spectrum_rbw() == 1 ? 2 : 1);
+    g_settings.sp_rbw = spectrum_rbw();
+    settings_mark_dirty();
 }
 
 static const char *rbw_value(void)
@@ -553,6 +573,8 @@ static void cal_action(void)
     if (next > SPECTRUM_CAL_MAX_DB)
         next = SPECTRUM_CAL_MIN_DB;
     spectrum_set_cal((int8_t)next);
+    g_settings.sp_cal = spectrum_cal();
+    settings_mark_dirty();
 }
 
 static const char *cal_value(void)
@@ -584,6 +606,8 @@ static void alarm_action(void)
         led_off();
     }
     m_alarm_until = 0;
+    g_settings.sp_alarm_db = alarm_levels[m_alarm_sel];
+    settings_mark_dirty();
 }
 
 static const char *alarm_value(void)
@@ -607,6 +631,8 @@ const app_screen_t act_alarm = {
 static void dwell_action(void)
 {
     scanner_set_adaptive(!scanner_adaptive());
+    g_settings.sp_adaptive = scanner_adaptive();
+    settings_mark_dirty();
 }
 
 static const char *dwell_value(void)

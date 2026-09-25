@@ -15,7 +15,9 @@
  * bytes and filling the new fields with their defaults.
  *   v1: contrast .. reserved (16 bytes)
  *   v2: + invert, burnin, saver_min, sentry_db, sentry_period (24 bytes)
- *   v3: + sniff_rate, sniff_bits, beacon_type, beacon_int (28 bytes)
+ *   v3: + sniff_rate, sniff_bits, reserved_v3a, reserved_v3b (28 bytes)
+ *   v4: + intro_done, home_screen, nfc_* fields, nfc_text (76 bytes)
+ *   v5: + spectrum, BLE and Zigbee screen options (88 bytes)
  */
 #ifndef PIXLA_SETTINGS_H
 #define PIXLA_SETTINGS_H
@@ -24,13 +26,16 @@
 #include <stdint.h>
 
 #define SETTINGS_MAGIC 0x414C5850u // "PXLA"
-#define SETTINGS_VERSION 4
+#define SETTINGS_VERSION 5
 
 // Longest NFC tag text the settings carry
 #define NFC_TEXT_MAX 40
 
 // Data size of every version, for the migration
 #define SETTINGS_V1_SIZE 16
+#define SETTINGS_V2_SIZE 24
+#define SETTINGS_V3_SIZE 28
+#define SETTINGS_V4_SIZE 76
 
 typedef enum
 {
@@ -72,18 +77,31 @@ typedef struct
     uint8_t sentry_period; // sentry mode: one sweep every this many 100ms
     uint8_t reserved2[3];
     // v3
-    uint8_t sniff_rate;  // ESB sniffer PHY: 0 auto, 1 2Mbit, 2 1Mbit
-    uint8_t sniff_bits;  // ESB sniffer payload bit order: 0 MSB, 1 LSB
-    uint8_t beacon_type; // beacon TX preset, ble_beacon_type_t
-    uint8_t beacon_int;  // beacon TX interval index, see ble_beacon.h
+    uint8_t sniff_rate;    // ESB sniffer PHY: 0 auto, 1 2Mbit, 2 1Mbit
+    uint8_t sniff_bits;    // ESB sniffer payload bit order: 0 MSB, 1 LSB
+    uint8_t reserved_v3a;  // was beacon_type, kept for layout compatibility
+    uint8_t reserved_v3b;  // was beacon_int, kept for layout compatibility
     // v4
-    uint8_t intro_done;   // the first boot tutorial was shown
-    uint8_t home_screen;  // which main screen the device starts on
-    uint8_t nfc_mode;     // nfc_mode_t, live again on the NFC screen entry
-    uint8_t nfc_msg_type; // nfc_msg_type_t
+    uint8_t intro_done;     // the first boot tutorial was shown
+    uint8_t home_screen;    // which main screen the device starts on
+    uint8_t nfc_mode;       // nfc_mode_t, live again on the NFC screen entry
+    uint8_t nfc_msg_type;   // nfc_msg_type_t
     uint8_t nfc_uid_random; // randomise the NFCID1 on every start
     char nfc_text[NFC_TEXT_MAX + 1]; // the tag's URI or text
-    uint8_t reserved3[2]; // keep the layout whole words
+    uint8_t reserved4[2];   // keep the layout whole words
+    // v5: options of the screens, changed from their menu rows
+    uint8_t sp_trace;    // spectrum trace_mode_t
+    uint8_t sp_rbw;      // spectrum resolution, 1 or 2 MHz
+    int8_t sp_cal;       // spectrum calibration offset in dB
+    uint8_t sp_alarm_db; // interference alarm threshold in dB, 0 disables
+    uint8_t sp_adaptive; // adaptive dwell on the scanner
+    uint8_t sp_view;     // scanner layout (split, spectrum, waterfall)
+    uint8_t ble_filter;  // BLE list filter
+    uint8_t ble_sort;    // BLE list order
+    uint8_t ble_follow;  // BLE following alert mode
+    uint8_t ble_spam;    // BLE spam flood alert
+    uint8_t zb_lock;     // Zigbee channel 11..26, 0 hops
+    uint8_t reserved5;
 } settings_data_t;
 
 extern settings_data_t g_settings;

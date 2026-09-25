@@ -86,6 +86,11 @@ static void ble_enter(void)
     m_sel = 0;
     m_sel_type = 0xFF;
     m_following_shown = 0;
+    m_filter = g_settings.ble_filter < BLE_FILTER_COUNT ? g_settings.ble_filter : BLE_FILTER_ALL;
+    m_sort = g_settings.ble_sort < BLE_SORT_COUNT ? g_settings.ble_sort : BLE_SORT_RSSI;
+    m_follow_mode = g_settings.ble_follow < BLE_FOLLOW_MODE_COUNT ? g_settings.ble_follow
+                                                                   : BLE_FOLLOW_TRACKERS;
+    m_spam_alert = g_settings.ble_spam != 0;
 }
 
 static void ble_leave(void)
@@ -347,10 +352,15 @@ const app_screen_t scr_ble_hunt = {
 };
 
 // ---------------------------------------------------------------------------
-// Menu options (Receive group), session only
+// Menu options (Receive group)
 // ---------------------------------------------------------------------------
 
-static void act_filter(void) { m_filter = (uint8_t)((m_filter + 1) % BLE_FILTER_COUNT); }
+static void act_filter(void)
+{
+    m_filter = (uint8_t)((m_filter + 1) % BLE_FILTER_COUNT);
+    g_settings.ble_filter = m_filter;
+    settings_mark_dirty();
+}
 
 static const char *val_filter(void)
 {
@@ -358,7 +368,12 @@ static const char *val_filter(void)
     return names[m_filter];
 }
 
-static void act_sort(void) { m_sort = (uint8_t)((m_sort + 1) % BLE_SORT_COUNT); }
+static void act_sort(void)
+{
+    m_sort = (uint8_t)((m_sort + 1) % BLE_SORT_COUNT);
+    g_settings.ble_sort = m_sort;
+    settings_mark_dirty();
+}
 
 static const char *val_sort(void)
 {
@@ -369,6 +384,8 @@ static const char *val_sort(void)
 static void act_follow(void)
 {
     m_follow_mode = (uint8_t)((m_follow_mode + 1) % BLE_FOLLOW_MODE_COUNT);
+    g_settings.ble_follow = m_follow_mode;
+    settings_mark_dirty();
 }
 
 static const char *val_follow(void)
@@ -377,7 +394,12 @@ static const char *val_follow(void)
     return names[m_follow_mode];
 }
 
-static void act_spam(void) { m_spam_alert = !m_spam_alert; }
+static void act_spam(void)
+{
+    m_spam_alert = !m_spam_alert;
+    g_settings.ble_spam = m_spam_alert;
+    settings_mark_dirty();
+}
 
 static const char *val_spam(void) { return m_spam_alert ? "ON" : "OFF"; }
 

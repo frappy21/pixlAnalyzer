@@ -40,7 +40,10 @@ typedef struct
 _Static_assert(sizeof(settings_data_t) % 4 == 0, "settings data must be whole words");
 _Static_assert(sizeof(settings_record_t) == RECORD_LEN(sizeof(settings_data_t)),
                "record layout must match the page walk");
-_Static_assert(SETTINGS_V1_SIZE <= sizeof(settings_data_t), "layouts only grow");
+_Static_assert(SETTINGS_V1_SIZE <= SETTINGS_V2_SIZE, "layouts only grow");
+_Static_assert(SETTINGS_V2_SIZE <= SETTINGS_V3_SIZE, "layouts only grow");
+_Static_assert(SETTINGS_V3_SIZE <= SETTINGS_V4_SIZE, "layouts only grow");
+_Static_assert(SETTINGS_V4_SIZE <= sizeof(settings_data_t), "layouts only grow");
 
 uint32_t settings_crc32(const void *data, uint32_t len)
 {
@@ -83,8 +86,8 @@ void settings_defaults(void)
     // v3
     g_settings.sniff_rate = 0;      // auto: 2Mbit first, then 1Mbit
     g_settings.sniff_bits = 0;      // payload bytes most significant bit first
-    g_settings.beacon_type = 0;     // the plain name
-    g_settings.beacon_int = 1;      // 250 ms
+    g_settings.reserved_v3a = 0;
+    g_settings.reserved_v3b = 0;
 
     // v4
     g_settings.intro_done = 0;
@@ -94,6 +97,19 @@ void settings_defaults(void)
     g_settings.nfc_uid_random = 0;  // stable UID from the device id
     memset(g_settings.nfc_text, 0, sizeof(g_settings.nfc_text));
     strcpy(g_settings.nfc_text, "PIXLANALYZER.GITHUB.IO");
+
+    // v5
+    g_settings.sp_trace = 0;     // TRACE_PEAK
+    g_settings.sp_rbw = 1;
+    g_settings.sp_cal = 0;
+    g_settings.sp_alarm_db = 0;
+    g_settings.sp_adaptive = 1;
+    g_settings.sp_view = 0;      // LAYOUT_SPLIT
+    g_settings.ble_filter = 0;   // BLE_FILTER_ALL
+    g_settings.ble_sort = 0;     // BLE_SORT_RSSI
+    g_settings.ble_follow = 1;   // BLE_FOLLOW_TRACKERS
+    g_settings.ble_spam = 1;
+    g_settings.zb_lock = 0;
 }
 
 // Values outside their range (a record from a buggy build, a bit flip that
@@ -123,10 +139,6 @@ static void sanitize(void)
         s->sniff_rate = 0;
     if (s->sniff_bits > 1)
         s->sniff_bits = 0;
-    if (s->beacon_type >= 7) // BLE_BEACON_TYPE_COUNT
-        s->beacon_type = 0;
-    if (s->beacon_int >= 5) // BLE_BEACON_INTV_COUNT
-        s->beacon_int = 1;
     if (s->nfc_mode > 2) // NFC_MODE_COUNT - 1
         s->nfc_mode = 0;
     if (s->nfc_msg_type > 1)
@@ -144,6 +156,16 @@ static void sanitize(void)
             s->nfc_text[i] = '-';
     }
     s->nfc_text[NFC_TEXT_MAX] = 0;
+
+    // v5 screen options
+    if (s->sp_rbw != 1 && s->sp_rbw != 2)
+        s->sp_rbw = 1;
+    if (s->sp_cal < -10 || s->sp_cal > 10)
+        s->sp_cal = 0;
+    if (s->sp_alarm_db > 40)
+        s->sp_alarm_db = 0;
+    if (s->zb_lock && (s->zb_lock < 11 || s->zb_lock > 26))
+        s->zb_lock = 0;
 }
 
 bool settings_dirty(void) { return m_dirty; }
@@ -248,6 +270,12 @@ static bool record_usable(const uint8_t *rec, uint16_t *version)
     bool ok;
     if (hdr.version == 1)
         ok = (hdr.size == SETTINGS_V1_SIZE);
+    else if (hdr.version == 2)
+        ok = (hdr.size == SETTINGS_V2_SIZE);
+    else if (hdr.version == 3)
+        ok = (hdr.size == SETTINGS_V3_SIZE);
+    else if (hdr.version == 4)
+        ok = (hdr.size == SETTINGS_V4_SIZE);
     else if (hdr.version == SETTINGS_VERSION)
         ok = (hdr.size == sizeof(settings_data_t));
     else

@@ -134,17 +134,15 @@ int main(void)
     check("new field sentry_period takes its default", g_settings.sentry_period, 5);
     check("v3 sniff_rate takes its default", g_settings.sniff_rate, 0);
     check("v3 sniff_bits takes its default", g_settings.sniff_bits, 0);
-    check("v3 beacon_type takes its default", g_settings.beacon_type, 0);
-    check("v3 beacon_int takes its default", g_settings.beacon_int, 1);
+    check("v5 sp_rbw takes its default", g_settings.sp_rbw, 1);
+    check("v5 ble_spam takes its default", g_settings.ble_spam, 1);
     check("a migrated record leaves the settings dirty", settings_dirty(), 1);
 
-    printf("\nv2/v3 appended after v1\n");
+    printf("\ncurrent version appended after v1\n");
     g_settings.invert = 1;
     g_settings.sentry_db = 25;
     g_settings.sniff_rate = 2;
     g_settings.sniff_bits = 1;
-    g_settings.beacon_type = 3;
-    g_settings.beacon_int = 2;
     check("save succeeds", settings_save(), 1);
     uint32_t magic;
     memcpy(&magic, settings_host_page(), 4);
@@ -156,11 +154,9 @@ int main(void)
     settings_load();
     check("newest record is the current one", settings_loaded_version(), SETTINGS_VERSION);
     check_user_fields("after resave");
-    check("new field survives the round trip", g_settings.invert, 1);
+    check("invert survives the round trip", g_settings.invert, 1);
     check("sniff_rate survives the round trip", g_settings.sniff_rate, 2);
     check("sniff_bits survives the round trip", g_settings.sniff_bits, 1);
-    check("beacon_type survives the round trip", g_settings.beacon_type, 3);
-    check("beacon_int survives the round trip", g_settings.beacon_int, 2);
     check("sentry threshold survives the round trip", g_settings.sentry_db, 25);
     check("a current record is not dirty", settings_dirty(), 0);
 
@@ -185,6 +181,68 @@ int main(void)
     check("page rewritten with the current version", settings_loaded_version(),
           SETTINGS_VERSION);
     check("contrast kept through the rewrite", g_settings.contrast, 17);
+
+    printf("\nv4 -> v%d migration\n", SETTINGS_VERSION);
+    check("v4 fields are a prefix of the current layout",
+          offsetof(settings_data_t, sp_trace), SETTINGS_V4_SIZE);
+    erase();
+    settings_defaults();
+    settings_data_t v4snap = g_settings;
+    // Copy the v1 user fields into v4snap and tweak some v4 fields
+    memcpy(&v4snap, &old, sizeof(old));
+    v4snap.band = BAND_ISM;
+    v4snap.contrast = 17;
+    v4snap.invert = 1;
+    v4snap.sentry_db = 30;
+    v4snap.sniff_rate = 1;
+    v4snap.intro_done = 1;
+    v4snap.home_screen = 2;
+    {
+        uint8_t rec[8 + SETTINGS_V4_SIZE + 4];
+        uint32_t m4 = SETTINGS_MAGIC;
+        uint16_t ver4 = 4, sz4 = SETTINGS_V4_SIZE;
+        memcpy(rec, &m4, 4);
+        memcpy(rec + 4, &ver4, 2);
+        memcpy(rec + 6, &sz4, 2);
+        memcpy(rec + 8, &v4snap, SETTINGS_V4_SIZE);
+        uint32_t crc4 = settings_crc32(rec + 8, SETTINGS_V4_SIZE);
+        memcpy(rec + 8 + SETTINGS_V4_SIZE, &crc4, 4);
+        memcpy(settings_host_page(), rec, sizeof(rec));
+        end = sizeof(rec);
+    }
+    settings_load();
+    check("v4 record used", settings_loaded_version(), 4);
+    check("v4 invert kept", g_settings.invert, 1);
+    check("v4 sentry_db kept", g_settings.sentry_db, 30);
+    check("v4 sniff_rate kept", g_settings.sniff_rate, 1);
+    check("v4 intro_done kept", g_settings.intro_done, 1);
+    check("v4 home_screen kept", g_settings.home_screen, 2);
+    check("v5 sp_adaptive takes its default", g_settings.sp_adaptive, 1);
+    check("v5 ble_follow takes its default", g_settings.ble_follow, 1);
+    check("v5 zb_lock takes its default", g_settings.zb_lock, 0);
+    check("a migrated v4 record leaves the settings dirty", settings_dirty(), 1);
+    g_settings.sp_cal = -6;
+    g_settings.sp_alarm_db = 20;
+    g_settings.zb_lock = 15;
+    check("v5 save after v4 succeeds", settings_save(), 1);
+    g_settings.sp_cal = 0;
+    g_settings.zb_lock = 0;
+    settings_load();
+    check("newest record is v5", settings_loaded_version(), SETTINGS_VERSION);
+    check("negative cal offset survives", g_settings.sp_cal, -6);
+    check("alarm threshold survives", g_settings.sp_alarm_db, 20);
+    check("zigbee lock survives", g_settings.zb_lock, 15);
+    check("v4 invert still there", g_settings.invert, 1);
+
+    printf("\nv5 out of range values\n");
+    g_settings.sp_cal = 50;
+    g_settings.sp_rbw = 7;
+    g_settings.zb_lock = 5;
+    settings_save();
+    settings_load();
+    check("bad cal offset falls back to 0", g_settings.sp_cal, 0);
+    check("bad rbw falls back to 1", g_settings.sp_rbw, 1);
+    check("bad zigbee channel falls back to hop", g_settings.zb_lock, 0);
 
     printf("\nfull page\n");
     erase();

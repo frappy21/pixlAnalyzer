@@ -30,6 +30,9 @@ extern const app_screen_t scr_intro;   // the first boot tutorial
 uint16_t scr_scanner_marker_mhz(void);
 void scr_scanner_apply_band(void);
 
+// Takes the saved Spectrum options (trace, RBW, cal, alarm, dwell, view) over
+void scr_scanner_load_options(void);
+
 // The intro screen runs once on a fresh device (main.c)
 void scr_intro_run(void);
 

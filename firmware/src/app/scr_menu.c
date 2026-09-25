@@ -5,6 +5,7 @@
  * same from anywhere.
  */
 #include "screens.h"
+#include "settings.h"
 #include "ui.h"
 
 // Rows one menu can hold, Back row included
@@ -142,6 +143,12 @@ static void top_menu_enter(void)
     m_top_sel = 0;
 }
 
+static void top_menu_leave(void)
+{
+    if (settings_dirty())
+        settings_save();
+}
+
 static void top_menu_tick(uint32_t now)
 {
     menu_tick(APP_GROUP_SYSTEM, &m_top_sel);
@@ -151,6 +158,7 @@ const app_screen_t scr_menu = {
     .name = "Menu",
     .group = APP_GROUP_HIDDEN,
     .enter = top_menu_enter,
+    .leave = top_menu_leave,
     .tick = top_menu_tick,
 };
 

@@ -9,6 +9,7 @@
  */
 #include "app.h"
 #include "screens.h"
+#include "settings.h"
 #include "ui_zigbee.h"
 #include "zb_rx.h"
 
@@ -62,6 +63,7 @@ static void zb_enter(void)
 {
     zb_rx_init(g_app_arena, ZB_ARENA_BYTES);
     m_hop_ch = ZB_CH_FIRST;
+    m_lock = g_settings.zb_lock; // bounded by sanitize(): 0 or 11..26
 }
 
 static void zb_tick(uint32_t now)
@@ -72,11 +74,15 @@ static void zb_tick(uint32_t now)
     if (app_left())
     {
         m_lock = (m_lock == 0) ? ZB_CH_LAST : (m_lock == ZB_CH_FIRST ? 0 : (uint8_t)(m_lock - 1));
+        g_settings.zb_lock = m_lock;
+        settings_mark_dirty();
         app_redraw();
     }
     if (app_right())
     {
         m_lock = (m_lock == 0) ? ZB_CH_FIRST : (m_lock == ZB_CH_LAST ? 0 : (uint8_t)(m_lock + 1));
+        g_settings.zb_lock = m_lock;
+        settings_mark_dirty();
         app_redraw();
     }
     if (app_ok())
