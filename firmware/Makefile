@@ -162,6 +162,10 @@ test:
 		test/test_sweep_order.c src/radio/sweep_order.c \
 		-o $(OUTPUT_DIRECTORY)/test_sweep_order
 	@$(OUTPUT_DIRECTORY)/test_sweep_order
+	$(CC_HOST) -std=c11 -Wall -Wextra -Iconfig -Isrc/app -Isrc/radio -Isrc/gfx -Isrc/drivers \
+		test/test_spectrum_render.c src/gfx/gfx.c src/gfx/font3x5.c src/gfx/font5x7.c \
+		src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_render
+	@$(OUTPUT_DIRECTORY)/test_spectrum_render
 	@python3 test/test_blsettings.py
 
 CC_HOST ?= cc

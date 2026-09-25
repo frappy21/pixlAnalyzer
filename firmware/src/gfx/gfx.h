@@ -5,8 +5,31 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-void gfx_pixel(int x, int y, bool on);
-bool gfx_pixel_get(int x, int y);
+#include "display.h"
+
+// Single pixels are inline: the text and line primitives call them for every
+// dot, and a call plus the / and % per pixel cost more than the work itself
+static inline void gfx_pixel(int x, int y, bool on)
+{
+    if ((unsigned)x < DISP_W && (unsigned)y < DISP_H)
+    {
+        uint8_t *p = &g_frame_buffer[x + (y >> 3) * DISP_W];
+        uint8_t bit = (uint8_t)(1u << (y & 7));
+        if (on)
+            *p |= bit;
+        else
+            *p &= (uint8_t)~bit;
+    }
+}
+
+static inline bool gfx_pixel_get(int x, int y)
+{
+    if ((unsigned)x >= DISP_W || (unsigned)y >= DISP_H)
+        return false;
+
+    return (g_frame_buffer[x + (y >> 3) * DISP_W] >> (y & 7)) & 1;
+}
+
 void gfx_vline(int x, int y1, int y2);
 void gfx_hline(int x1, int x2, int y);
 void gfx_box(int x, int y, int w, int h, bool fill, bool color);

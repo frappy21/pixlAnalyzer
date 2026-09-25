@@ -11,6 +11,22 @@
 
 #define ROW_BYTES (DISP_W / 4) // two bits per column
 
+// The spectrum plot is drawn a column at a time into one 32 bit mask, bit 0 is
+// the top row of the first frame buffer page it touches
+#define SPEC_PAGE0 (SPECTRUM_TOP / 8)
+#define SPEC_BOTTOM (SPECTRUM_TOP + SPECTRUM_H - 1)
+#define SPEC_PAGES (SPEC_BOTTOM / 8 - SPEC_PAGE0 + 1)
+#define SPEC_BIT(y) ((y) - SPEC_PAGE0 * 8)
+
+// Blank columns kept between ruler labels. Digits inside a label are already
+// one column apart, so one column between labels would read as one number.
+#define LABEL_GAP 2
+
+_Static_assert(SPEC_PAGES <= 4, "spectrum plot must fit in a 32 bit column mask");
+_Static_assert(SPECTRUM_H >= 1 && SPEC_BOTTOM < DISP_H, "spectrum plot off screen");
+_Static_assert(WATERFALL_START >= 0 && WATERFALL_START + WATERFALL_ROWS <= DISP_H,
+               "waterfall off screen");
+
 static uint8_t m_live_db[SCAN_MAX_CHANNELS];
 static uint8_t m_peak_db[SCAN_MAX_CHANNELS];
 static uint8_t m_max_db[SCAN_MAX_CHANNELS];
@@ -21,6 +37,12 @@ static bool m_has_ref;
 static uint8_t m_history[HISTORY_ROWS][ROW_BYTES];
 static uint16_t m_head;
 static uint16_t m_rows;
+
+// Channel under each column, rebuilt when the scanner configuration changes
+static uint8_t m_col_chan[DISP_W];
+static uint8_t m_lut_count;
+static uint16_t m_lut_lo;
+static uint16_t m_lut_hi;
 
 static uint8_t m_accum[DISP_W]; // levels accumulated between waterfall rows
 static uint8_t m_accum_count;
@@ -60,18 +82,34 @@ uint8_t spectrum_max_db(uint8_t chan_index) { return m_max_db[chan_index]; }
 uint16_t spectrum_history_rows(void) { return m_rows; }
 uint32_t spectrum_sweeps(void) { return m_sweeps; }
 
-uint8_t spectrum_col_to_chan(int col)
+// The scanner does not announce configuration changes, so compare what the
+// table was built for on every use. Three getters are far cheaper than a
+// division per column.
+static const uint8_t *col_chan_table(void)
 {
     uint8_t count = scanner_count();
-    if (count == 0)
-        return 0;
+    uint16_t lo = scanner_span_start();
+    uint16_t hi = scanner_span_end();
+
+    if (count != m_lut_count || lo != m_lut_lo || hi != m_lut_hi)
+    {
+        for (int col = 0; col < DISP_W; col++)
+            m_col_chan[col] = (uint8_t)(((uint16_t)col * count) / DISP_W);
+        m_lut_count = count;
+        m_lut_lo = lo;
+        m_lut_hi = hi;
+    }
+    return m_col_chan;
+}
+
+uint8_t spectrum_col_to_chan(int col)
+{
     if (col < 0)
         col = 0;
     if (col >= DISP_W)
         col = DISP_W - 1;
 
-    uint16_t idx = ((uint16_t)col * count) / DISP_W;
-    return idx >= count ? count - 1 : (uint8_t)idx;
+    return col_chan_table()[col];
 }
 
 int spectrum_chan_to_col(uint8_t chan_index)
@@ -126,16 +164,6 @@ static void history_push(void)
     m_accum_count = 0;
 }
 
-static uint8_t history_level(uint16_t rows_back, int col)
-{
-    if (rows_back >= m_rows)
-        return 0;
-
-    uint16_t idx = (uint16_t)((m_head + HISTORY_ROWS - 1 - rows_back) % HISTORY_ROWS);
-    uint8_t packed = m_history[idx][col / 4];
-    return (packed >> ((col % 4) * 2)) & 3;
-}
-
 bool spectrum_update(uint32_t now_ms)
 {
     uint8_t count = scanner_count();
@@ -176,9 +204,10 @@ bool spectrum_update(uint32_t now_ms)
 
     // Accumulate the waterfall row: one row is the maximum over wf_decim sweeps,
     // which is what makes sparse traffic visible at all
+    const uint8_t *col_chan = col_chan_table();
     for (int x = 0; x < DISP_W; x++)
     {
-        uint8_t idx = spectrum_col_to_chan(x);
+        uint8_t idx = col_chan[x];
         uint8_t level = level_of(m_live_db[idx], g_scan[idx].busy);
         if (level > m_accum[x])
             m_accum[x] = level;
@@ -193,66 +222,143 @@ bool spectrum_update(uint32_t now_ms)
     return false;
 }
 
+// Rows first to last of the plot as a column mask
+static uint32_t spec_rows(int first, int last)
+{
+    return (0xFFFFFFFFu >> (31 - (last - first))) << SPEC_BIT(first);
+}
+
 void spectrum_draw(int marker_col)
 {
-    // dB grid
+    // dB grid, a dot every 8 columns
+    uint32_t grid = 0;
     for (int db = DB_PER_GRID; db < SPECTRUM_RANGE_DB; db += DB_PER_GRID)
     {
-        int y = SPECTRUM_TOP + SPECTRUM_H - 1 - (db * SPECTRUM_H) / SPECTRUM_RANGE_DB;
-        for (int x = 0; x < DISP_W; x += 8)
-            gfx_pixel(x, y, true);
+        int y = SPEC_BOTTOM - (db * SPECTRUM_H) / SPECTRUM_RANGE_DB;
+        grid |= 1u << SPEC_BIT(y);
     }
+
+    const uint8_t *col_chan = col_chan_table();
+    uint8_t *fb = &g_frame_buffer[SPEC_PAGE0 * DISP_W];
 
     for (int x = 0; x < DISP_W; x++)
     {
-        uint8_t idx = spectrum_col_to_chan(x);
+        uint8_t idx = col_chan[x];
+        uint32_t col = (x & 7) == 0 ? grid : 0;
 
         int bar = (m_peak_db[idx] * SPECTRUM_H) / SPECTRUM_RANGE_DB;
         if (bar > SPECTRUM_H)
             bar = SPECTRUM_H;
         if (bar > 0)
-            gfx_vline(x, SPECTRUM_TOP + SPECTRUM_H - bar, SPECTRUM_TOP + SPECTRUM_H - 1);
+            col |= spec_rows(SPEC_BOTTOM + 1 - bar, SPEC_BOTTOM);
 
         // Max hold as a dotted cap above the live bar
         int cap = (m_max_db[idx] * SPECTRUM_H) / SPECTRUM_RANGE_DB;
         if (cap > SPECTRUM_H)
             cap = SPECTRUM_H;
         if (cap > 0 && (x & 1) == 0)
-            gfx_pixel(x, SPECTRUM_TOP + SPECTRUM_H - cap, true);
+            col |= 1u << SPEC_BIT(SPEC_BOTTOM + 1 - cap);
 
-        // Reference trace as a sparse dashed line
+        // Reference trace as a sparse dashed line. It is not clamped, so a
+        // value above the range lands above the plot like it always did.
         if (m_has_ref && (x & 3) == 0)
         {
             int r = (m_ref_db[idx] * SPECTRUM_H) / SPECTRUM_RANGE_DB;
-            if (r > 0)
-                gfx_pixel(x, SPECTRUM_TOP + SPECTRUM_H - r, true);
+            if (r > SPECTRUM_H)
+                gfx_pixel(x, SPEC_BOTTOM + 1 - r, true);
+            else if (r > 0)
+                col |= 1u << SPEC_BIT(SPEC_BOTTOM + 1 - r);
         }
+
+        for (int p = 0; p < SPEC_PAGES; p++)
+            fb[p * DISP_W + x] |= (uint8_t)(col >> (p * 8));
     }
 
+    // Marker as a dotted line that inverts whatever is under it
     if (marker_col >= 0 && marker_col < DISP_W)
     {
-        for (int y = SPECTRUM_TOP; y < SPECTRUM_TOP + SPECTRUM_H; y += 2)
-            gfx_pixel(marker_col, y, !gfx_pixel_get(marker_col, y));
+        uint32_t dots = 0;
+        for (int y = SPECTRUM_TOP; y <= SPEC_BOTTOM; y += 2)
+            dots |= 1u << SPEC_BIT(y);
+        for (int p = 0; p < SPEC_PAGES; p++)
+            fb[p * DISP_W + marker_col] ^= (uint8_t)(dots >> (p * 8));
     }
+}
+
+// Spreads the level flags of one history byte (bits 0, 2, 4, 6 for its four
+// columns) to bit 0 of four bytes, column 4k + c ending up in byte c. The
+// partial products never meet at bits 0, 8, 16 or 24, so no carry spoils them.
+static inline uint32_t spread4(uint32_t flags)
+{
+    return (flags * 0x41041u) & 0x01010101u;
 }
 
 void spectrum_draw_waterfall(uint16_t scroll_back)
 {
     bool dither = (g_settings.wf_mode == WF_DITHER);
 
-    for (uint16_t r = 0; r < WATERFALL_ROWS; r++)
+    // Which level each pixel needs, as masks over the column fields of a
+    // history byte (even columns at bits 0 and 4, odd at 2 and 6), per row
+    // parity. The dither is the ordered 2x2 Bayer matrix {{0, 2}, {3, 1}}
+    // indexed [x & 1][y & 1]: a pixel is on when its level exceeds the entry.
+    // Threshold mode draws levels 2 and 3 solid.
+    static const uint8_t need[2][2][3] = {
+        // level >= 1, >= 2, >= 3
+        {{0x00, 0x55, 0x00}, {0x00, 0x55, 0x00}}, // threshold
+        {{0x11, 0x00, 0x00}, {0x00, 0x44, 0x11}}, // dither, y even / y odd
+    };
+
+    int y_end = WATERFALL_START + WATERFALL_ROWS;
+    for (int page = WATERFALL_START / 8; page * 8 < y_end; page++)
     {
-        int y = WATERFALL_START + r;
-        for (int x = 0; x < DISP_W; x++)
+        // Four columns per word, one byte each, bit (y % 8) per row
+        uint32_t acc[ROW_BYTES] = {0};
+        bool any = false;
+
+        int y0 = page * 8 < WATERFALL_START ? WATERFALL_START : page * 8;
+        int y1 = page * 8 + 8 < y_end ? page * 8 + 8 : y_end;
+        for (int y = y0; y < y1; y++)
         {
-            uint8_t level = history_level(scroll_back + r, x);
-            if (level == 0)
+            uint16_t rows_back = (uint16_t)(scroll_back + (y - WATERFALL_START));
+            if (rows_back >= m_rows)
                 continue;
 
-            if (dither)
-                gfx_dither_pixel(x, y, level);
-            else if (level >= 2)
-                gfx_pixel(x, y, true);
+            uint16_t ring = (uint16_t)(m_head + HISTORY_ROWS - 1 - rows_back);
+            if (ring >= HISTORY_ROWS)
+                ring -= HISTORY_ROWS;
+            const uint8_t *row = m_history[ring];
+            const uint8_t *m = need[dither][y & 1];
+            int shift = y & 7;
+
+            for (int k = 0; k < ROW_BYTES; k++)
+            {
+                uint8_t b = row[k];
+                if (!b)
+                    continue;
+
+                uint8_t ge1 = (b | (b >> 1)) & 0x55;
+                uint8_t ge2 = (b >> 1) & 0x55;
+                uint8_t ge3 = b & (b >> 1) & 0x55;
+                uint8_t on = (ge1 & m[0]) | (ge2 & m[1]) | (ge3 & m[2]);
+                if (on)
+                {
+                    acc[k] |= spread4(on) << shift;
+                    any = true;
+                }
+            }
+        }
+
+        if (!any)
+            continue;
+
+        uint8_t *fb = &g_frame_buffer[page * DISP_W];
+        for (int k = 0; k < ROW_BYTES; k++)
+        {
+            uint32_t w = acc[k];
+            fb[4 * k + 0] |= (uint8_t)w;
+            fb[4 * k + 1] |= (uint8_t)(w >> 8);
+            fb[4 * k + 2] |= (uint8_t)(w >> 16);
+            fb[4 * k + 3] |= (uint8_t)(w >> 24);
         }
     }
 }
@@ -260,8 +366,9 @@ void spectrum_draw_waterfall(uint16_t scroll_back)
 void spectrum_draw_ruler(uint8_t plan, int marker_col)
 {
     // A dedicated row so labels never sit on top of the data
+    uint8_t *fb = &g_frame_buffer[(RULER_Y / 8) * DISP_W];
     for (int x = 0; x < DISP_W; x++)
-        gfx_pixel(x, RULER_Y, true);
+        fb[x] |= (uint8_t)(1u << (RULER_Y % 8));
 
     if (plan == PLAN_NONE)
         return;
@@ -270,6 +377,9 @@ void spectrum_draw_ruler(uint8_t plan, int marker_col)
     uint16_t hi = scanner_span_end();
     if (hi <= lo)
         return;
+
+    // Right edge of the last label drawn
+    int last_end = -1 - LABEL_GAP;
 
     for (uint8_t i = 0; i < channels_plan_count(plan); i++)
     {
@@ -301,12 +411,19 @@ void spectrum_draw_ruler(uint8_t plan, int marker_col)
         *p++ = (char)('0' + mark.number % 10);
         *p = '\0';
 
-        int lx = cx - gfx_text_micro_width(label) / 2;
+        int w = gfx_text_micro_width(label);
+        int lx = cx - w / 2;
         if (lx < 0)
             lx = 0;
-        if (lx + gfx_text_micro_width(label) >= DISP_W)
-            lx = DISP_W - 1 - gfx_text_micro_width(label);
+        if (lx + w >= DISP_W)
+            lx = DISP_W - 1 - w;
+
+        // Dense plans (WiFi 10..13) would run their labels together: drop a
+        // label that would touch the previous one, its bracket still shows
+        if (lx <= last_end + LABEL_GAP)
+            continue;
         gfx_text_micro(lx, RULER_Y + 2, label);
+        last_end = lx + w - 1;
     }
 
     if (marker_col >= 0 && marker_col < DISP_W)

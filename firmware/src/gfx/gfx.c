@@ -4,25 +4,6 @@
 #include "font3x5.h"
 #include "font5x7.h"
 
-void gfx_pixel(int x, int y, bool on)
-{
-    if (x >= 0 && x < DISP_W && y >= 0 && y < DISP_H)
-    {
-        if (on)
-            g_frame_buffer[x + (y / 8) * DISP_W] |= (1 << (y % 8));
-        else
-            g_frame_buffer[x + (y / 8) * DISP_W] &= ~(1 << (y % 8));
-    }
-}
-
-bool gfx_pixel_get(int x, int y)
-{
-    if (x < 0 || x >= DISP_W || y < 0 || y >= DISP_H)
-        return false;
-
-    return (g_frame_buffer[x + (y / 8) * DISP_W] & (1 << (y % 8))) != 0;
-}
-
 void gfx_vline(int x, int y1, int y2)
 {
     if (y1 > y2)
