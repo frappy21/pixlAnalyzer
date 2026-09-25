@@ -39,6 +39,7 @@ SRC_FILES += \
   src/app/scr_scanner.c \
   src/app/scr_settings.c \
   src/app/scr_tx.c \
+  src/app/scr_zigbee.c \
   src/app/screens.c \
   src/app/settings.c \
   src/app/spectrum.c \
@@ -47,6 +48,7 @@ SRC_FILES += \
   src/app/ui_esb.c \
   src/app/ui_info.c \
   src/app/ui_tx.c \
+  src/app/ui_zigbee.c \
   src/drivers/battery.c \
   src/drivers/buttons.c \
   src/drivers/display.c \
@@ -65,6 +67,7 @@ SRC_FILES += \
   src/radio/scanner.c \
   src/radio/sweep_order.c \
   src/radio/tx_test.c \
+  src/radio/zb_rx.c \
 
 # Application headers
 INC_FOLDERS += \
@@ -177,6 +180,9 @@ test:
 		test/test_sweep_order.c src/radio/sweep_order.c \
 		-o $(OUTPUT_DIRECTORY)/test_sweep_order
 	@$(OUTPUT_DIRECTORY)/test_sweep_order
+	$(CC_HOST) -std=c11 -Wall -Wextra -DZB_RX_HOST_TEST -Isrc/radio \
+		test/test_zb_rx.c src/radio/zb_rx.c -o $(OUTPUT_DIRECTORY)/test_zb_rx
+	@$(OUTPUT_DIRECTORY)/test_zb_rx
 	$(CC_HOST) -std=c11 -Wall -Wextra -Iconfig -Isrc/app -Isrc/radio -Isrc/gfx -Isrc/drivers \
 		test/test_spectrum_render.c src/gfx/gfx.c src/gfx/font3x5.c src/gfx/font5x7.c \
 		src/app/channels.c -o $(OUTPUT_DIRECTORY)/test_spectrum_render

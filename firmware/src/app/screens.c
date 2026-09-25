@@ -24,6 +24,8 @@
     X(scr_ble)             \
     X(scr_ble_detail)      \
     X(scr_esb)             \
+    X(scr_zigbee)          \
+    X(scr_zigbee_pan)      \
     X(scr_tx)              \
     X(scr_settings)        \
     X(scr_info)            \
@@ -37,7 +39,8 @@
     X(scr_scanner, "SPECTRUM")    \
     X(scr_top, "WIFI")            \
     X(scr_ble, "BLE")             \
-    X(scr_esb, "RC")
+    X(scr_esb, "RC")              \
+    X(scr_zigbee, "ZIGBEE")
 
 #define APP_SCREEN_EXTERN(s) extern const app_screen_t s;
 #define APP_SCREEN_ENTRY(s) &s,
