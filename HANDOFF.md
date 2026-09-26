@@ -51,6 +51,10 @@ this application plus its settings page.
 
 ## Build
 
+Step by step instructions, including flashing with any probe and recovering from
+mistakes, live in [BUILD_AND_FLASH.md](BUILD_AND_FLASH.md). The short version:
+
+
 Needs `make` and `arm-none-eabi-gcc` in PATH (any recent version; built and
 tested with 13.3.1). The nRF5 SDK 17.1.0 is vendored in `firmware/sdk/`.
 

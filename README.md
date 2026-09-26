@@ -182,8 +182,9 @@ make test                # host side tests of the button debouncing
 is enough. Override with `make GNU_INSTALL_ROOT=/path/to/bin/ GNU_VERSION=13.3.1` for a toolchain
 that is not in PATH. On Windows the path still comes from Makefile.windows in the SDK folder.
 
-See [HANDOFF.md](HANDOFF.md) for flashing with a J-Link, the bootloader settings page that SWD
-flashing needs, and the current state of testing.
+See [BUILD_AND_FLASH.md](BUILD_AND_FLASH.md) for the full build and flashing instructions (SWD with
+any probe, OTA, backups, troubleshooting), and [HANDOFF.md](HANDOFF.md) for what the firmware does
+and the current state of testing.
 
 Packaging the OTA .zip files needs nrfutil. If nrfutil is not available on your platform, use
 
